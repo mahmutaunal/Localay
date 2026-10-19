@@ -1,0 +1,1750 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Globalization;
+using System.Linq;
+using System.Text;
+using System.Web;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Documents;
+using System.Windows.Input;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
+using System.Windows.Threading;
+using System.Media;
+using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
+using Color = System.Windows.Media.Color;
+using Colors = System.Windows.Media.Colors;
+using FontFamily = System.Windows.Media.FontFamily;
+using Brushes = System.Windows.Media.Brushes;
+using TextBox = System.Windows.Controls.TextBox;
+using WinCursors = System.Windows.Input.Cursors;
+using WinForms = System.Windows.Forms;
+
+namespace AlpWareStudio.Localay
+{
+    public partial class ChatBoxWindow : Window
+    {
+        // Windows API imports for click-through functionality
+        [DllImport("user32.dll")]
+        private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+        [DllImport("user32.dll")]
+        private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetLayeredWindowAttributes(IntPtr hWnd, uint crKey, byte bAlpha, uint dwFlags);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetDC(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateCompatibleDC(IntPtr hDC);
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteDC(IntPtr hDC);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr SelectObject(IntPtr hDC, IntPtr hObject);
+
+        [DllImport("gdi32.dll")]
+        private static extern bool DeleteObject(IntPtr hObject);
+
+        [DllImport("gdi32.dll", EntryPoint = "CreateRectRgn")]
+        private static extern IntPtr CreateRectRgnDirect(int x1, int y1, int x2, int y2);
+
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr CreateEllipticRgn(int x1, int y1, int x2, int y2);
+
+        [DllImport("gdi32.dll")]
+        private static extern int CombineRgn(IntPtr hrgnDest, IntPtr hrgnSrc1, IntPtr hrgnSrc2, int fnCombineMode);
+
+        [DllImport("user32.dll")]
+        private static extern int SetWindowRgn(IntPtr hWnd, IntPtr hRgn, bool bRedraw);
+
+        // Constants
+        private const int MAX_CONTEXT_HISTORY_SIZE = 100; // Max entries to keep for context purposes
+
+        // We'll use MainWindow.Instance.translationHistory instead of maintaining our own
+        private int _maxHistorySize; // Display history size from config
+        private int _displayMode = 1; // 0 = both, 1 = target only, 2 = source only
+
+        public static ChatBoxWindow? Instance { get; private set; }
+
+        // Animation timer for translation status
+        private DispatcherTimer? _animationTimer;
+
+        // Auto-clear timer for clearing chatbox after inactivity
+        private DispatcherTimer? _autoClearTimer;
+        private DateTime _lastTranslationTime = DateTime.MinValue;
+
+        // Flag used to allow a forced close (different from normal hide-on-close behavior)
+        private bool _forceClose = false;
+
+        // Semaphore to ensure only one speech request is processed at a time
+        private static readonly SemaphoreSlim _speechSemaphore = new SemaphoreSlim(1, 1);
+
+        // Thread-safe queue for speech requests
+        private static readonly ConcurrentQueue<string> _speechQueue = new ConcurrentQueue<string>();
+
+        // Flag to track if we're currently processing speech
+        private static bool _isProcessingSpeech = false;
+
+        // Lock to make EnqueueSpeechRequest's check-and-start atomic, preventing
+        // two concurrent enqueues from both starting a ProcessSpeechQueueAsync task.
+        private static readonly object _speechStartLock = new object();
+
+        // Cancellation token source for speech processing
+        private static CancellationTokenSource? _speechCancellationTokenSource;
+
+        // Click-through overlay for toggle button
+        private IntPtr _clickThroughOverlayHandle = IntPtr.Zero;
+        private bool _isClickThroughMode = false;
+        private Window? _clickThroughOverlayWindow = null;
+
+        private int _animationStep = 0;
+
+        public ChatBoxWindow()
+        {
+            Instance = this;
+            InitializeComponent();
+
+            // Register application-wide keyboard shortcut handler
+            this.PreviewKeyDown += Application_KeyDown;
+
+            // Get max history size from configuration for display purposes
+            _maxHistorySize = ConfigManager.Instance.GetChatBoxHistorySize();
+
+            // Load display mode from config
+            _displayMode = ConfigManager.Instance.GetChatboxDisplayMode();
+
+            // Initialize the RichTextBox with a properly configured document
+            chatHistoryText.Document = new FlowDocument()
+            {
+                // Set basic document properties
+                FontFamily = new FontFamily("Segoe UI"),
+                FontSize = 14,
+                Foreground = Brushes.White,
+                TextAlignment = TextAlignment.Left,
+
+                // Make sure the document is visible
+                IsEnabled = true,
+                IsHyphenationEnabled = false,
+
+                // Ensure text wraps properly
+                PageWidth = 350,
+
+                // Standard margins
+                PagePadding = new Thickness(5)
+            };
+
+            // Ensure the document is visible
+            chatHistoryText.IsDocumentEnabled = true;
+
+            // Set up context menu
+            SetupContextMenu();
+
+            // Apply custom styling from configuration
+            ApplyConfigurationStyling();
+
+            // Set up animation timer
+            _animationTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(300)
+            };
+            _animationTimer.Tick += AnimationTimer_Tick;
+
+            // Set up auto-clear timer (checks every second)
+            _autoClearTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            _autoClearTimer.Tick += AutoClearTimer_Tick;
+            _autoClearTimer.Start();
+
+            // Subscribe to events
+            this.Loaded += ChatBoxWindow_Loaded;
+            this.Closing += ChatBoxWindow_Closing;
+            this.LocationChanged += ChatBoxWindow_LocationChanged;
+            this.SizeChanged += ChatBoxWindow_SizeChanged_WithSave;
+
+            // Listen for Logic's translation in progress status
+            Logic.Instance.TranslationCompleted += OnTranslationCompleted;
+        }
+
+        private void SetupContextMenu()
+        {
+            // Create a context menu
+            ContextMenu contextMenu = new ContextMenu();
+
+            // Add standard menu items
+            MenuItem cutItem = new MenuItem() { Header = "Cut" };
+            cutItem.Command = ApplicationCommands.Cut;
+            contextMenu.Items.Add(cutItem);
+
+            MenuItem copyItem = new MenuItem() { Header = "Copy" };
+            copyItem.Command = ApplicationCommands.Copy;
+            contextMenu.Items.Add(copyItem);
+
+            MenuItem pasteItem = new MenuItem() { Header = "Paste" };
+            pasteItem.Command = ApplicationCommands.Paste;
+            contextMenu.Items.Add(pasteItem);
+
+            // Add a separator
+            contextMenu.Items.Add(new Separator());
+
+            // Add Learn menu item
+            MenuItem learnItem = new MenuItem() { Header = "Learn" };
+            learnItem.Click += LearnMenuItem_Click;
+            contextMenu.Items.Add(learnItem);
+
+            // Add Speak menu item
+            MenuItem speakItem = new MenuItem() { Header = "Speak" };
+            speakItem.Click += SpeakMenuItem_Click;
+            contextMenu.Items.Add(speakItem);
+
+            // Assign the context menu to the RichTextBox
+            chatHistoryText.ContextMenu = contextMenu;
+        }
+
+        private void LearnMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Get the selected text
+                TextRange selectedText = new TextRange(
+                    chatHistoryText.Selection.Start,
+                    chatHistoryText.Selection.End);
+
+                if (!string.IsNullOrWhiteSpace(selectedText.Text))
+                {
+                    // Construct the ChatGPT URL with the selected text and instructions
+                    string chatGptPrompt = $"Create a lesson to help me learn about this text and its translation: {selectedText.Text}";
+                    string encodedPrompt = HttpUtility.UrlEncode(chatGptPrompt);
+                    string chatGptUrl = $"https://chat.openai.com/?q={encodedPrompt}";
+
+                    // Open in default browser
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = chatGptUrl,
+                        UseShellExecute = true
+                    });
+
+                    Console.WriteLine($"Opening ChatGPT with selected text: {selectedText.Text.Substring(0, Math.Min(50, selectedText.Text.Length))}...");
+                }
+                else
+                {
+                    Console.WriteLine("No text selected for Learn function");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in Learn function: {ex.Message}");
+            }
+        }
+
+        private void SpeakMenuItem_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Get the selected text
+                TextRange selectedText = new TextRange(
+                    chatHistoryText.Selection.Start,
+                    chatHistoryText.Selection.End);
+
+                if (!string.IsNullOrWhiteSpace(selectedText.Text))
+                {
+                    string text = selectedText.Text.Trim();
+                    EnqueueSpeechRequest(text);
+                }
+                else
+                {
+                    Console.WriteLine("No text selected for Speak function");
+                    System.Windows.MessageBox.Show("Please select some text to speak first.",
+                        "No Text Selected", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in Speak function: {ex.Message}");
+                System.Windows.MessageBox.Show($"Error: {ex.Message}", "Text-to-Speech Error",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        // Process the speech queue
+        // _isProcessingSpeech is set by EnqueueSpeechRequest (under _speechStartLock) before this
+        // task starts, and cleared here under the same lock only once the queue is seen empty.
+        // Setting it inside the task, and clearing it outside the lock, let a line enqueued at
+        // the wrong moment either wait for the next line or start a second processor.
+        private static async Task ProcessSpeechQueueAsync(CancellationTokenSource cts)
+        {
+            var cancellationToken = cts.Token;
+            Console.WriteLine("Starting speech queue processing");
+            
+            try
+            {
+                
+                await Task.Delay(5, cancellationToken);
+                
+                while (!cancellationToken.IsCancellationRequested)
+                {
+                    lock (_speechStartLock)
+                    {
+                        if (_speechQueue.IsEmpty)
+                        {
+                            if (ReferenceEquals(_speechCancellationTokenSource, cts)) _isProcessingSpeech = false;
+                            return;
+                        }
+                    }
+
+                    StringBuilder combinedText = new StringBuilder();
+                    int queueSize = _speechQueue.Count;
+                    Console.WriteLine($"Processing {queueSize} speech requests as one batch");
+                    
+                    // Dequeue all items and combine them
+                    string? lastAppended = null;
+                    while (_speechQueue.TryDequeue(out string? textToSpeak) && !cancellationToken.IsCancellationRequested)
+                    {
+                        if (!string.IsNullOrWhiteSpace(textToSpeak))
+                        {
+                            // Deduplicate: skip if identical to the last item we appended.
+                            // This prevents the same translation (enqueued twice by a bug or
+                            // race) from being spoken twice in a row.
+                            if (lastAppended != null &&
+                                string.Equals(lastAppended, textToSpeak, StringComparison.Ordinal))
+                            {
+                                Console.WriteLine($"Skipping duplicate speech item: {textToSpeak.Substring(0, Math.Min(50, textToSpeak.Length))}...");
+                                continue;
+                            }
+
+                            // Add a space between items if needed
+                            if (combinedText.Length > 0)
+                            {
+                                combinedText.Append(" ");
+                            }
+
+                            combinedText.Append(textToSpeak);
+                            lastAppended = textToSpeak;
+                        }
+                    }
+                    
+                    // If we have text to speak, process it as one request
+                    if (combinedText.Length > 0 && !cancellationToken.IsCancellationRequested)
+                    {
+                        string finalText = combinedText.ToString();
+                        Console.WriteLine($"Speaking combined text ({finalText.Length} chars): {finalText.Substring(0, Math.Min(50, finalText.Length))}...");
+                        
+                        // Process the combined speech request
+                        await Speak_Item_InternalAsync(finalText, cancellationToken);
+                    }
+                    
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Speech processing was cancelled");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in speech queue processing: {ex.Message}");
+            }
+            finally
+            {
+                // Only the current processor may clear the flag: after StopSpeechQueue a newer
+                // processor may already be running.
+                lock (_speechStartLock)
+                {
+                    if (ReferenceEquals(_speechCancellationTokenSource, cts)) _isProcessingSpeech = false;
+                }
+                Console.WriteLine("Speech queue processing completed");
+            }
+        }
+
+        // Enqueue a speech request and start processing if needed
+        public static void EnqueueSpeechRequest(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            try
+            {
+                // Process the text to remove line breaks and normalize spaces
+                string processedText = ProcessTextForSpeech(text);
+
+                // Add the processed text to the queue
+                _speechQueue.Enqueue(processedText);
+                AudioTiming.Log("6. TTS queued", AudioTiming.Preview(processedText));
+                Console.WriteLine($"Speech request enqueued. Queue size: {_speechQueue.Count}");
+
+                // Atomically check whether a processor task needs to be started.
+                // Without this lock, two concurrent enqueues could both observe
+                // _isProcessingSpeech == false and both start a processing task,
+                // which (combined with the non-atomic flag) could lead to the
+                // same text being spoken twice.
+                lock (_speechStartLock)
+                {
+                    if (!_isProcessingSpeech)
+                    {
+                        // No processor is running, so the previous token source (if any) is
+                        // no longer in use.
+                        _speechCancellationTokenSource?.Dispose();
+                        var cts = new CancellationTokenSource();
+                        _speechCancellationTokenSource = cts;
+                        _isProcessingSpeech = true;
+
+                        // Start the processing task
+                        Task.Run(() => ProcessSpeechQueueAsync(cts));
+                    }
+                    else
+                    {
+                        // Already processing — the queued item will be picked up by the
+                        // running processor's loop. No need to start a new task.
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error enqueueing speech request: {ex.Message}");
+            }
+        }
+
+        // Process text to optimize for speech with minimal pauses
+        private static string ProcessTextForSpeech(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return string.Empty;
+            
+            // Replace multiple newlines with a single space to reduce pauses
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\n+", ".");
+            
+            // Replace multiple spaces with a single space
+            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
+            
+            // text = System.Text.RegularExpressions.Regex.Replace(text, @"\.{2,}", ".");
+            // text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*([.,;:!?])\s*", "$1 ");
+            
+            return text.Trim();
+        }
+
+        private static async Task<bool> Speak_Item_InternalAsync(string text, CancellationToken cancellationToken)
+        {
+            if (string.IsNullOrWhiteSpace(text) || cancellationToken.IsCancellationRequested)
+                return false;
+
+            try
+            {
+                string trimmedText = text.Trim();
+                Console.WriteLine($"Speaking text: {trimmedText.Substring(0, Math.Min(50, trimmedText.Length))}...");
+
+                // Check if TTS is enabled in config
+                if (ConfigManager.Instance.IsTtsEnabled())
+                {
+                    string ttsService = ConfigManager.Instance.GetTtsService();
+                    
+                    // Wait to acquire the semaphore - this ensures only one speech request runs at a time
+                    await _speechSemaphore.WaitAsync(cancellationToken);
+                    
+                    try
+                    {
+                        bool success = false;
+                        AudioTiming.Log("7. TTS synthesis start", $"{ttsService}, {trimmedText.Length} chars");
+                        var ttsTimer = System.Diagnostics.Stopwatch.StartNew();
+
+                        if (ttsService == "ElevenLabs")
+                        {
+                            success = await ElevenLabsService.Instance.SpeakText(trimmedText);
+                        }
+                        else if (ttsService == "Google Cloud TTS")
+                        {
+                            success = await GoogleTTSService.Instance.SpeakText(trimmedText);
+                        }
+                        else if (ttsService == "Windows TTS")
+                        {
+                            success = await WindowsTTSService.Instance.SpeakText(trimmedText);
+                        }
+                        else if (ttsService == "Supertonic")
+                        {
+                            success = await SupertonicTTSService.Instance.SpeakText(trimmedText);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"Unsupported TTS service: {ttsService}");
+                            return false;
+                        }
+
+                        AudioTiming.Log("8. TTS synthesis done", $"{ttsTimer.ElapsedMilliseconds} ms (audio queued for playback)");
+                        if (!success)
+                        {
+                            Console.WriteLine($"Failed to generate speech using {ttsService}");
+                        }
+                        
+                        return success;
+                    }
+                    finally
+                    {
+                        // Always release the semaphore when done
+                        _speechSemaphore.Release();
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Text-to-Speech is disabled in settings");
+                    return true; // Consider this successful since TTS is disabled
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Speech operation was cancelled");
+                throw; // Re-throw to propagate cancellation
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in Speak function: {ex.Message}");
+                return false;
+            }
+        }
+
+        // For backward compatibility - now just enqueues the speech request
+        private void Speak_Item(string text)
+        {
+            EnqueueSpeechRequest(text);
+        }
+
+        private void ChatBoxWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
+        {
+            if (_forceClose)
+            {
+                // Allow the window to close for a forced close request
+                Console.WriteLine("ChatBox window force closing - performing cleanup");
+
+                // Stop animation timer
+                try { _animationTimer?.Stop(); } catch { }
+
+                // Stop auto-clear timer
+                try { _autoClearTimer?.Stop(); } catch { }
+
+                // Cancel any pending speech processing
+                try
+                {
+                    _speechCancellationTokenSource?.Cancel();
+                    _speechCancellationTokenSource?.Dispose();
+                    _speechCancellationTokenSource = null;
+                }
+                catch { }
+
+                // Unsubscribe from Logic events
+                try { Logic.Instance.TranslationCompleted -= OnTranslationCompleted; } catch { }
+
+                // Cleanup click-through overlay
+                CleanupClickThroughOverlay();
+
+                // Clear the static Instance reference so a new one can be created
+                Instance = null;
+
+                // Allow the close to proceed
+                e.Cancel = false;
+            }
+            else
+            {
+                // Don't actually close the window, just hide it
+                Console.WriteLine("ChatBox window closing intercepted - hiding instead");
+
+                // Cancel the closing operation
+                e.Cancel = true;
+
+                // Hide the window instead
+                this.Hide();
+
+                // Note: We maintain timer and event subscriptions since the window instance stays alive
+            }
+        }
+
+        // Force-close the window (bypasses the normal hide-on-close behavior)
+        public void ForceClose()
+        {
+            _forceClose = true;
+            try
+            {
+                this.Close();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error forcing ChatBox close: {ex.Message}");
+            }
+        }
+
+        public void ApplyConfigurationStyling()
+        {
+            try
+            {
+                // Get styling from ConfigManager
+                var fontFamily = ConfigManager.Instance.GetChatBoxFontFamily();
+                var fontSize = ConfigManager.Instance.GetChatBoxFontSize();
+                var fontColor = ConfigManager.Instance.GetChatBoxFontColor();
+                var backgroundColor = ConfigManager.Instance.GetChatBoxBackgroundColor();
+                var bgOpacity = ConfigManager.Instance.GetChatBoxBackgroundOpacity();
+                var windowOpacity = ConfigManager.Instance.GetChatBoxWindowOpacity();
+
+                // Apply background color with its opacity to window
+                if (bgOpacity <= 0)
+                {
+                    // Make all backgrounds completely transparent when opacity is 0
+                    this.Background = Brushes.Transparent;
+
+                    // Also make the ScrollViewer, RichTextBox and resize grip transparent
+                    if (chatScrollViewer != null)
+                    {
+                        chatScrollViewer.Background = Brushes.Transparent;
+                    }
+                    if (chatHistoryText != null)
+                    {
+                        chatHistoryText.Background = Brushes.Transparent;
+                    }
+
+                    if (resizeGrip != null)
+                    {
+                        resizeGrip.Fill = Brushes.Transparent;
+                    }
+                }
+                else
+                {
+                    // Calculate opacity value that:
+                    // - At 0%, stays 0%
+                    // - At 50%, is more like true 50%
+                    // - At 100%, is actually 100%
+                    double scaledOpacity;
+                    if (bgOpacity >= 0.95)
+                    {
+                        // Ensure full opacity when set to maximum
+                        scaledOpacity = 1.0;
+                    }
+                    else
+                    {
+                        // Use a blend of linear and square-root for intermediate values
+                        scaledOpacity = 0.7 * Math.Sqrt(bgOpacity) + 0.3 * bgOpacity;
+                    }
+
+                    // Set main window background
+                    Color bgColorWithOpacity = Color.FromArgb(
+                        (byte)(scaledOpacity * 255), // Full opacity when slider is at 100%
+                        backgroundColor.R,
+                        backgroundColor.G,
+                        backgroundColor.B);
+                    this.Background = new SolidColorBrush(bgColorWithOpacity);
+
+                    // Set the RichTextBox background directly to match
+                    if (chatHistoryText != null)
+                    {
+                        chatHistoryText.Background = new SolidColorBrush(Color.FromArgb(
+                            (byte)(scaledOpacity * 255),
+                            0, 0, 0)); // Black background
+                    }
+
+                    // Set resize grip
+                    if (resizeGrip != null)
+                    {
+                        Color gripColor = Color.FromArgb(
+                            (byte)(bgOpacity * 128), // Half opacity of background
+                            128, 128, 128);          // Gray color
+                        resizeGrip.Fill = new SolidColorBrush(gripColor);
+                    }
+                }
+
+                // Apply window opacity
+                this.Opacity = windowOpacity;
+
+                // Ensure header bar is always visible (at least 50% opacity)
+                if (headerBar != null)
+                {
+                    // Calculate header opacity - always at least 50% opaque
+                    byte headerOpacity = (byte)Math.Max(128, (int)(bgOpacity * 255));
+
+                    // Make header always visible
+                    Color headerColor = Color.FromArgb(
+                        headerOpacity,  // At least 50% opaque
+                        0x20, 0x20, 0x20);  // Dark gray
+                    headerBar.Background = new SolidColorBrush(headerColor);
+                }
+
+                // Apply text outline color from config
+                var textOutlineColor = ConfigManager.Instance.GetTextOutlineColor();
+                if (chatHistoryText != null)
+                {
+                    chatHistoryText.Effect = new System.Windows.Media.Effects.DropShadowEffect
+                    {
+                        ShadowDepth = 0,
+                        BlurRadius = 5,
+                        Color = textOutlineColor,
+                        Opacity = 1
+                    };
+                }
+
+                // Store values for use when creating text entries
+                this.FontFamily = new FontFamily(fontFamily);
+                ChatFontSize = fontSize;  // Set the chat-specific font size
+                this.Foreground = new SolidColorBrush(fontColor);
+
+                // Apply updated styling to existing entries
+                UpdateChatHistory();
+
+                Console.WriteLine($"Applied ChatBox styling: Font={fontFamily}, Size={fontSize}, Color={fontColor}, BG={backgroundColor}, Window Opacity={windowOpacity}, BG Opacity={bgOpacity}, Outline={textOutlineColor}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error applying ChatBox styling: {ex.Message}");
+            }
+        }
+
+        private void OptionsButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Create options window
+                var optionsWindow = new ChatBoxOptionsWindow();
+
+                // Set the owner to ensure it appears on top of this window
+                optionsWindow.Owner = this;
+
+                // Make this window appear in front
+                this.Topmost = false;
+                this.Topmost = true;
+
+                // Show the dialog
+                var result = optionsWindow.ShowDialog();
+
+                // If user clicked OK, styling will already be applied by the options window
+                if (result == true)
+                {
+                    Console.WriteLine("Chat box options updated");
+
+                    // Create and start the flash animation for visual feedback
+                    CreateFlashAnimation(optionsButton);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error showing options dialog: {ex.Message}");
+            }
+        }
+
+        private void ChatBoxWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            // Load saved position from config (only if recreate-on-show is disabled)
+            if (!ConfigManager.Instance.IsChatboxRecreateOnShowEnabled())
+            {
+                LoadChatboxPosition();
+            }
+
+            // Set mode button content based on loaded display mode
+            if (modeButton != null)
+            {
+                if (_displayMode == 0)
+                {
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_BothTexts"];
+                }
+                else if (_displayMode == 1)
+                {
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_TranslatedText"];
+                }
+                else if (_displayMode == 2)
+                {
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_OriginalText"];
+                }
+            }
+
+            // Position the window based on screen bounds if not already positioned
+            // This check ensures we don't overwrite loaded/saved positions
+            if (this.Left == 0 && this.Top == 0)
+            {
+                var screenWidth = SystemParameters.PrimaryScreenWidth;
+                var screenHeight = SystemParameters.PrimaryScreenHeight;
+
+                // Default to bottom right corner
+                this.Left = screenWidth - this.Width - 20;
+                this.Top = screenHeight - this.Height - 40;
+            }
+
+            // Create the click-through overlay window for the toggle button
+            CreateClickThroughOverlay();
+        }
+
+        /// <summary>
+        /// Creates a transparent overlay window for the toggle button that remains clickable
+        /// even when the main chatbox window is in click-through mode
+        /// </summary>
+        private void CreateClickThroughOverlay()
+        {
+            // Create a transparent window that will sit on top of the toggle button
+            _clickThroughOverlayWindow = new Window
+            {
+                WindowStyle = WindowStyle.None,
+                ResizeMode = ResizeMode.NoResize,
+                AllowsTransparency = true,
+                ShowInTaskbar = false,
+                Topmost = true,
+                Background = Brushes.Transparent,
+                Width = 24,
+                Height = 24,
+                ShowActivated = false
+            };
+
+            // Add click handler to the overlay window (not needed with SetWindowRgn but kept for visual toggle)
+            _clickThroughOverlayWindow.MouseLeftButtonDown += (s, e) =>
+            {
+                // When clicked, toggle the borders
+                ToggleBordersButton_Click(this, e);
+                e.Handled = true;
+            };
+
+            // Position the overlay over the toggle button
+            UpdateOverlayPosition();
+
+            // Subscribe to position changes to keep overlay synced
+            this.LocationChanged += (s, args) => UpdateOverlayPosition();
+            this.StateChanged += (s, args) => UpdateOverlayPosition();
+        }
+
+        /// <summary>
+        /// Updates the overlay window position to match the toggle button position
+        /// </summary>
+        private void UpdateOverlayPosition()
+        {
+            if (_clickThroughOverlayWindow == null || toggleBordersButton == null)
+                return;
+
+            try
+            {
+                // Get the toggle button's position in screen coordinates
+                var buttonTransform = toggleBordersButton.TransformToAncestor(this);
+                var buttonLocation = buttonTransform.Transform(new System.Windows.Point(0, 0));
+                var buttonSize = new System.Windows.Size(toggleBordersButton.ActualWidth, toggleBordersButton.ActualHeight);
+
+                // Position the overlay window
+                _clickThroughOverlayWindow.Left = this.Left + buttonLocation.X - 2;
+                _clickThroughOverlayWindow.Top = this.Top + buttonLocation.Y - 2;
+                _clickThroughOverlayWindow.Width = buttonSize.Width + 4;
+                _clickThroughOverlayWindow.Height = buttonSize.Height + 4;
+
+                // If in click-through mode, update the window region too
+                if (_isClickThroughMode)
+                {
+                    var windowInterop = new System.Windows.Interop.WindowInteropHelper(this);
+                    IntPtr hWnd = windowInterop.Handle;
+                    if (hWnd != IntPtr.Zero)
+                    {
+                        int left = (int)(buttonLocation.X - 2);
+                        int top = (int)(buttonLocation.Y - 2);
+                        int right = (int)(left + buttonSize.Width + 4);
+                        int bottom = (int)(top + buttonSize.Height + 4);
+
+                        IntPtr toggleRgn = CreateRectRgnDirect(left, top, right, bottom);
+                        SetWindowRgn(hWnd, toggleRgn, true);
+                    }
+                }
+            }
+            catch
+            {
+                // Ignore positioning errors
+            }
+        }
+
+        /// <summary>
+        /// Enables click-through mode - clicks pass through the window except for the toggle button area
+        /// </summary>
+        private void EnableClickThroughMode()
+        {
+            if (_isClickThroughMode)
+                return;
+
+            _isClickThroughMode = true;
+
+            // Get the window handle
+            var windowInterop = new System.Windows.Interop.WindowInteropHelper(this);
+            IntPtr hWnd = windowInterop.Handle;
+
+            if (hWnd != IntPtr.Zero)
+            {
+                // Create a rectangular region for just the toggle button area
+                // Get toggle button position in screen coordinates
+                var buttonTransform = toggleBordersButton.TransformToAncestor(this);
+                var buttonLocation = buttonTransform.Transform(new System.Windows.Point(0, 0));
+                var buttonSize = new System.Windows.Size(toggleBordersButton.ActualWidth, toggleBordersButton.ActualHeight);
+
+                int left = (int)(buttonLocation.X - 2);
+                int top = (int)(buttonLocation.Y - 2);
+                int right = (int)(left + buttonSize.Width + 4);
+                int bottom = (int)(top + buttonSize.Height + 4);
+
+                // Create region for just the toggle button area
+                        IntPtr toggleRgn = CreateRectRgnDirect(left, top, right, bottom);
+
+                // Set the window region - only this area will receive clicks
+                SetWindowRgn(hWnd, toggleRgn, true);
+            }
+
+            // Show the overlay window for visual feedback (transparent)
+            if (_clickThroughOverlayWindow != null)
+            {
+                _clickThroughOverlayWindow.Show();
+                UpdateOverlayPosition();
+            }
+        }
+
+        /// <summary>
+        /// Disables click-through mode - normal window interaction
+        /// </summary>
+        private void DisableClickThroughMode()
+        {
+            if (!_isClickThroughMode)
+                return;
+
+            _isClickThroughMode = false;
+
+            // Get the window handle
+            var windowInterop = new System.Windows.Interop.WindowInteropHelper(this);
+            IntPtr hWnd = windowInterop.Handle;
+
+            if (hWnd != IntPtr.Zero)
+            {
+                // Remove the region - full window is clickable again
+                SetWindowRgn(hWnd, IntPtr.Zero, true);
+            }
+
+            // Hide the overlay window
+            _clickThroughOverlayWindow?.Hide();
+        }
+
+        /// <summary>
+        /// Cleanup the click-through overlay window
+        /// </summary>
+        private void CleanupClickThroughOverlay()
+        {
+            if (_clickThroughOverlayWindow != null)
+            {
+                _clickThroughOverlayWindow.Close();
+                _clickThroughOverlayWindow = null;
+            }
+            _clickThroughOverlayHandle = IntPtr.Zero;
+        }
+
+        // Handler for application-level keyboard shortcuts
+        private void Application_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            // Forward to the central keyboard shortcuts handler
+            KeyboardShortcuts.HandleKeyDown(e);
+        }
+
+        private void ChatBoxWindow_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            // Reflow text when window size changes
+            UpdateChatHistory();
+        }
+
+        // Save position when window is moved
+        private void ChatBoxWindow_LocationChanged(object? sender, EventArgs e)
+        {
+            // Only save position if window is visible and not being initialized
+            if (this.IsVisible && this.IsLoaded)
+            {
+                SaveChatboxPosition();
+            }
+        }
+
+        // Save position when window is resized
+        private void ChatBoxWindow_SizeChanged_WithSave(object sender, SizeChangedEventArgs e)
+        {
+            // Reflow text when window size changes
+            UpdateChatHistory();
+            
+            // Save size if window is visible and loaded
+            if (this.IsVisible && this.IsLoaded)
+            {
+                SaveChatboxPosition();
+            }
+        }
+
+        // Save chatbox position and size to config
+        private void SaveChatboxPosition()
+        {
+            try
+            {
+                ConfigManager.Instance.SetChatboxPositionLeft(this.Left);
+                ConfigManager.Instance.SetChatboxPositionTop(this.Top);
+                ConfigManager.Instance.SetChatboxPositionWidth(this.Width);
+                ConfigManager.Instance.SetChatboxPositionHeight(this.Height);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error saving chatbox position: {ex.Message}");
+            }
+        }
+
+        // Load chatbox position from config
+        private void LoadChatboxPosition()
+        {
+            try
+            {
+                // Only load if recreate-on-show is disabled
+                if (!ConfigManager.Instance.IsChatboxRecreateOnShowEnabled())
+                {
+                    double left = ConfigManager.Instance.GetChatboxPositionLeft();
+                    double top = ConfigManager.Instance.GetChatboxPositionTop();
+                    double width = ConfigManager.Instance.GetChatboxPositionWidth();
+                    double height = ConfigManager.Instance.GetChatboxPositionHeight();
+
+                    // Apply position if valid
+                    if (left > 0 || top > 0)
+                    {
+                        this.Left = left;
+                        this.Top = top;
+                        this.Width = width;
+                        this.Height = height;
+                        Console.WriteLine($"Loaded chatbox position: Left={left}, Top={top}, Width={width}, Height={height}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading chatbox position: {ex.Message}");
+            }
+        }
+
+        private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 1)
+            {
+                this.DragMove();
+            }
+        }
+
+        public static void StopSpeechQueue()
+        {
+            try
+            {
+                Console.WriteLine("Stopping speech queue processing");
+                
+                lock (_speechStartLock)
+                {
+                    // Cancel the current speech processing task. Not disposed here: the
+                    // processor may still observe the token; it is released by the next start.
+                    _speechCancellationTokenSource?.Cancel();
+                    _speechCancellationTokenSource = null;
+
+                    // Clear the speech queue
+                    while (_speechQueue.TryDequeue(out _))
+                    {
+                        // Just dequeue to clear
+                    }
+
+                    _isProcessingSpeech = false;
+                }
+                
+                Console.WriteLine("Speech queue cleared and processing stopped");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error stopping speech queue: {ex.Message}");
+            }
+        }
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e)
+        {
+            // Instead of closing, hide the window (to match behavior with Log window)
+            this.Hide();
+            MainWindow.Instance.chatBoxButton.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(69, 176, 105));
+
+            // The MainWindow will handle setting isChatBoxVisible to false in its event handler
+        }
+
+        // Store chat font size separately from window fonts
+        private double _chatFontSize = 14;  // Default chat font size
+
+        public double ChatFontSize
+        {
+            get { return _chatFontSize; }
+            set
+            {
+                _chatFontSize = Math.Max(8, Math.Min(48, value));  // Clamp between 8 and 48
+            }
+        }
+
+        private void FontIncreaseButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Increase font size and update
+                ChatFontSize += 1;
+                UpdateChatHistory();
+
+                // Save the new font size to config
+                ConfigManager.Instance.SetValue(ConfigManager.CHATBOX_FONT_SIZE, ChatFontSize.ToString(CultureInfo.InvariantCulture));
+                ConfigManager.Instance.SaveConfig();
+
+                // Create and start the flash animation for visual feedback
+                CreateFlashAnimation(fontIncreaseButton);
+
+                Console.WriteLine($"Chat font size increased to {ChatFontSize} and saved to config");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error increasing font size: {ex.Message}");
+            }
+        }
+
+        private void FontDecreaseButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Decrease font size and update
+                ChatFontSize -= 1;
+                UpdateChatHistory();
+
+                // Save the new font size to config
+                ConfigManager.Instance.SetValue(ConfigManager.CHATBOX_FONT_SIZE, ChatFontSize.ToString(CultureInfo.InvariantCulture));
+                ConfigManager.Instance.SaveConfig();
+
+                // Create and start the flash animation for visual feedback
+                CreateFlashAnimation(fontDecreaseButton);
+
+                Console.WriteLine($"Chat font size decreased to {ChatFontSize} and saved to config");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error decreasing font size: {ex.Message}");
+            }
+        }
+
+
+        // Create and apply a flash animation for the button
+        private void CreateFlashAnimation(System.Windows.Controls.Button button)
+        {
+            try
+            {
+                // Get the current background brush
+                SolidColorBrush? currentBrush = button.Background as SolidColorBrush;
+
+                if (currentBrush != null)
+                {
+                    // Need to freeze the original brush to animate its clone
+                    currentBrush = currentBrush.Clone();
+                    Color originalColor = currentBrush.Color;
+
+                    // Create a new brush for animation
+                    SolidColorBrush animBrush = new SolidColorBrush(originalColor);
+                    button.Background = animBrush;
+
+                    // Create color animation for the brush's Color property
+                    var animation = new ColorAnimation
+                    {
+                        From = originalColor,
+                        To = Colors.LightGreen,
+                        Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+                        AutoReverse = true,
+                        FillBehavior = FillBehavior.Stop // Stop the animation when complete
+                    };
+
+                    // Apply the animation to the brush's Color property
+                    animBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error creating flash animation: {ex.Message}");
+            }
+        }
+
+        // Play the clipboard sound
+        private void PlayClipboardSound()
+        {
+            try
+            {
+                string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+                string soundPath = System.IO.Path.Combine(appDirectory, "audio", "clipboard.wav") ?? "";
+
+                if (System.IO.File.Exists(soundPath))
+                {
+                    var player = new System.Media.SoundPlayer(soundPath);
+                    player.Play();
+                }
+                else
+                {
+                    Console.WriteLine($"Clipboard sound file not found: {soundPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error playing clipboard sound: {ex.Message}");
+            }
+        }
+
+        // textToSpeak: what TTS reads instead of the translation (only the new part of a completed
+        // typed-out line); empty reads nothing
+        public void OnTranslationWasAdded(string originalText, string translatedText, bool fromClipboard=false, string? textToSpeak=null)
+        {
+            // Hide translation status indicator if it was visible
+            HideTranslationStatus();
+
+            // Reset the auto-clear timer since we have a new translation
+            ResetAutoClearTimer();
+
+            // Update UI with existing history
+            UpdateChatHistory();
+            if (fromClipboard)
+            {
+                if (ConfigManager.Instance.IsExcludeCharacterNameEnabled())
+                {
+                    string[] text = translatedText.Split(':', 2);
+                    if (text.Length > 1)
+                    {
+                        EnqueueSpeechRequest(text[1]);
+                    }
+                    else
+                    {
+                        EnqueueSpeechRequest(text[0]);
+                    }
+                }
+                else
+                {
+                    EnqueueSpeechRequest(translatedText);
+                }
+            }
+            else
+            {
+                // Only enqueue TTS while a translation source is still running — OCR (Start
+                // button) or audio translation — so old translations are not read out after
+                // both are stopped. Audio-only use (e.g. dubbing game speech) must be spoken
+                // too, so OCR being off alone is not a reason to stay silent.
+                if (!string.IsNullOrEmpty(translatedText) &&
+                    ConfigManager.Instance.IsTtsEnabled() &&
+                    (MainWindow.Instance.GetIsStarted() || localWhisperService.Instance.IsRunning))
+                {
+                    if (textToSpeak != null)
+                    {
+                        // The name (if any) was at the start, which was already read
+                        EnqueueSpeechRequest(textToSpeak);
+                    }
+                    else if (ConfigManager.Instance.IsExcludeCharacterNameEnabled())
+                    {
+                        string[] text = translatedText.Split(':', 2);
+                        if (text.Length > 1)
+                        {
+                            EnqueueSpeechRequest(text[1]);
+                        }
+                        else
+                        {
+                            EnqueueSpeechRequest(text[0]);
+                        }
+                    }
+                    else
+                    {
+                        EnqueueSpeechRequest(translatedText);
+                    }
+                }
+            }
+        }
+
+        // Handle animation timer tick
+        private void AnimationTimer_Tick(object? sender, EventArgs e)
+        {
+            // Update the animation step (0, 1, 2, 3)
+            _animationStep = (_animationStep + 1) % 4;
+
+            // Update dot visibility based on animation step
+            if (dot1 != null && dot2 != null && dot3 != null)
+            {
+                // Reset all dots
+                dot1.Opacity = 0.3;
+                dot2.Opacity = 0.3;
+                dot3.Opacity = 0.3;
+
+                // Highlight dots based on animation step
+                switch (_animationStep)
+                {
+                    case 0:
+                        dot1.Opacity = 1.0;
+                        break;
+                    case 1:
+                        dot2.Opacity = 1.0;
+                        break;
+                    case 2:
+                        dot3.Opacity = 1.0;
+                        break;
+                    case 3:
+                        // All dots dim
+                        break;
+                }
+            }
+        }
+
+        // Auto-clear timer tick - clears chatbox after inactivity
+        private void AutoClearTimer_Tick(object? sender, EventArgs e)
+        {
+            int timeout = ConfigManager.Instance.GetAutoClearChatTimeout();
+
+            // If timeout is 0 or disabled, don't auto-clear
+            if (timeout <= 0)
+                return;
+
+            // If no translations yet, don't clear
+            if (_lastTranslationTime == DateTime.MinValue)
+                return;
+
+            // Check if enough time has passed since last translation
+            TimeSpan elapsed = DateTime.Now - _lastTranslationTime;
+            if (elapsed.TotalSeconds >= timeout)
+            {
+                // Clear the chatbox
+                ClearChatboxInternal();
+            }
+        }
+
+        // Internal method to clear chatbox (used by both button click and auto-clear timer)
+        private void ClearChatboxInternal()
+        {
+            // Clear the translation history queue in MainWindow
+            MainWindow.Instance.ClearTranslationHistory();
+
+            // Update the UI to show empty history
+            UpdateChatHistory();
+
+            Console.WriteLine("Chatbox auto-cleared due to inactivity");
+        }
+
+        // Reset the auto-clear timer (called when new translation is added)
+        private void ResetAutoClearTimer()
+        {
+            _lastTranslationTime = DateTime.Now;
+        }
+
+        // Show translation status indicator with animation
+        public void ShowTranslationStatus(bool bSettling)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => ShowTranslationStatus(bSettling));
+                return;
+            }
+
+            if (translationStatusPanel != null && _areBordersVisible)
+            {
+                // Show the translation status panel
+                translationStatusPanel.Visibility = Visibility.Visible;
+
+                // Update content based on settling state
+                if (bSettling && translationStatusText != null)
+                {
+                    // If settling, show "Settling..." message
+                    translationStatusText.Text = "Settling...";
+                }
+                else if (translationStatusText != null)
+                {
+                    // If translating, show translation notification with service name
+                    string service = ConfigManager.Instance.GetCurrentTranslationService();
+                    translationStatusText.Text = $"Waiting for {service}...";
+                }
+
+                // Start animation timer in all cases
+                if (_animationTimer != null && !_animationTimer.IsEnabled)
+                {
+                    _animationStep = 0;
+                    _animationTimer.Start();
+                }
+            }
+        }
+
+        // Hide translation status indicator
+        public void HideTranslationStatus()
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => HideTranslationStatus());
+                return;
+            }
+
+            if (translationStatusPanel != null)
+            {
+                translationStatusPanel.Visibility = Visibility.Collapsed;
+
+                // Stop the animation timer
+                if (_animationTimer != null && _animationTimer.IsEnabled)
+                {
+                    _animationTimer.Stop();
+                }
+            }
+        }
+
+        // Handle translation completed event
+        private void OnTranslationCompleted(object? sender, TranslationEventArgs e)
+        {
+            // Hide the translation status indicator
+            HideTranslationStatus();
+        }
+
+        // Get recent original texts for context
+        public List<string> GetRecentOriginalTexts(int maxCount, int minContextSize)
+        {
+            var result = new List<string>();
+
+            // Get access to MainWindow's translation history
+            var mainWindowHistory = MainWindow.Instance.GetTranslationHistory();
+
+            // If no history or count is zero, return empty list
+            if (mainWindowHistory.Count == 0 || maxCount <= 0)
+            {
+                return result;
+            }
+
+            // Copy the queue to a list so we can access by index, most recent first
+            var historyList = mainWindowHistory.Reverse().ToList();
+            int collected = 0;
+
+            // Collect entries until we have the requested number
+            for (int i = 0; i < historyList.Count && collected < maxCount; i++)
+            {
+                if (!string.IsNullOrEmpty(historyList[i].OriginalText))
+                {
+                    if (historyList[i].OriginalText.Length >= minContextSize)
+                    {
+                        result.Add(historyList[i].OriginalText);
+                        collected++;
+                    }
+                }
+            }
+
+            // Reverse the list so older entries come first (chronological order)
+            result.Reverse();
+
+            return result;
+        }
+
+        private void ModeButton_Click(object? sender, RoutedEventArgs? e)
+        {
+            try
+            {
+                // Cycle through display modes: 0 (both) -> 1 (target only) -> 2 (source only) -> 0 (both)
+                _displayMode = (_displayMode + 1) % 3;
+                if (_displayMode == 0)
+                {
+                    // Both
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_BothTexts"];
+                }
+                else if (_displayMode == 1)
+                {
+                    // Target only
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_TranslatedText"];
+                }
+                else if (_displayMode == 2)
+                {
+                    // Source only
+                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_OriginalText"];
+                }
+
+                // Save display mode to config
+                ConfigManager.Instance.SetChatboxDisplayMode(_displayMode);
+
+                // Update the UI
+                UpdateChatHistory();
+
+                // Create and start the flash animation for visual feedback
+                CreateFlashAnimation(modeButton);
+
+                // string[] modes = { "both languages", "target language only", "source language only" };
+                Console.WriteLine($"Display mode changed to: {modeButton.Content}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error changing display mode: {ex.Message}");
+            }
+        }
+
+        private void ClearButton_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Clear the translation history queue in MainWindow
+                MainWindow.Instance.ClearTranslationHistory();
+
+                // Update the UI to show empty history
+                UpdateChatHistory();
+
+                // Create and start the flash animation for visual feedback
+                CreateFlashAnimation(clearButton);
+
+                Console.WriteLine("Translation history cleared");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error clearing translation history: {ex.Message}");
+            }
+        }
+
+        private bool _areBordersVisible = true;
+
+
+        private void ToggleBordersButton_Click(object sender, RoutedEventArgs e)
+        {
+            _areBordersVisible = !_areBordersVisible;
+            
+            if (_areBordersVisible)
+            {
+                // Show border
+                headerBar.Visibility = Visibility.Visible;
+                
+                
+                if (translationStatusPanel.Tag != null && translationStatusPanel.Tag.ToString() == "Active")
+                {
+                    translationStatusPanel.Visibility = Visibility.Visible;
+                }
+                
+                // Adjust scrollview margin
+                chatScrollViewer.Margin = new Thickness(0, 28, 0, 30);
+                
+                // Update icon
+                toggleBordersIcon.Data = Geometry.Parse("M 4,2 L 12,2 L 12,6 L 4,6 Z M 4,10 L 12,10 L 12,14 L 4,14 Z");
+                
+                // Re-enable interaction with chatbox content
+                chatScrollViewer.IsHitTestVisible = true;
+                chatHistoryText.IsHitTestVisible = true;
+                
+                // Re-enable resize grip and window resize
+                resizeGrip.IsHitTestVisible = true;
+                resizeGrip.Visibility = Visibility.Visible;
+                this.ResizeMode = ResizeMode.CanResizeWithGrip;
+
+                // Disable click-through mode
+                DisableClickThroughMode();
+            }
+            else
+            {
+                // Hide border
+                headerBar.Visibility = Visibility.Collapsed;
+                translationStatusPanel.Visibility = Visibility.Collapsed;
+                
+                // Adjust scrollview margin
+                chatScrollViewer.Margin = new Thickness(0, 0, 0, 0);
+                
+                // Update icon
+                toggleBordersIcon.Data = Geometry.Parse("M 2,4 L 14,4 L 14,6 L 2,6 Z M 2,10 L 14,10 L 14,12 L 2,12 Z");
+                
+                // Disable interaction with chatbox content (click-through mode)
+                // Only the toggle button remains clickable
+                chatScrollViewer.IsHitTestVisible = false;
+                chatHistoryText.IsHitTestVisible = false;
+                
+                // Disable resize grip and window resize
+                resizeGrip.IsHitTestVisible = false;
+                resizeGrip.Visibility = Visibility.Collapsed;
+                this.ResizeMode = ResizeMode.NoResize;
+
+                // Enable click-through mode
+                EnableClickThroughMode();
+            }
+        }
+
+        public void UpdateChatHistory()
+        {
+            // Only update if window is visible
+            if (!this.IsVisible)
+                return;
+
+            // Run on UI thread
+            this.Dispatcher.Invoke(() =>
+            {
+                // Get styling from window's properties and config
+                var fontFamily = this.FontFamily;
+                var fontSize = this.ChatFontSize;
+                var originalTextColor = ConfigManager.Instance.GetOriginalTextColor();
+                var translatedTextColor = ConfigManager.Instance.GetTranslatedTextColor();
+                var bgOpacity = ConfigManager.Instance.GetChatBoxBackgroundOpacity();
+
+                // Get current target language
+                string targetLanguage = ConfigManager.Instance.GetTargetLanguage().ToLower();
+                string sourceLanguage = ConfigManager.Instance.GetSourceLanguage().ToLower();
+
+                // Define RTL (Right-to-Left) languages
+                HashSet<string> rtlLanguages = new HashSet<string> {
+                    "ar", "arabic", "fa", "farsi", "persian", "he", "hebrew", "ur", "urdu", "ckb", "central kurdish"
+                };
+
+                // Check if languages are RTL
+                bool isTargetRtl = rtlLanguages.Contains(targetLanguage);
+                bool isSourceRtl = rtlLanguages.Contains(sourceLanguage);
+
+                if (isTargetRtl)
+                {
+                    Console.WriteLine($"ChatBox: Detected RTL target language: {targetLanguage}");
+                }
+
+                // Clear existing content
+                chatHistoryText.Document.Blocks.Clear();
+
+                // Set up document properties to enable text wrapping
+                // PageWidth should match the viewport width of the ScrollViewer (minus padding)
+                // Subtract extra pixels to ensure text doesn't get too close to the scrollbar
+                chatHistoryText.Document.PageWidth = chatScrollViewer.ActualWidth > 0
+                    ? (chatScrollViewer.ActualWidth - 30) : 320;
+
+                // Set the background opacity
+                if (bgOpacity <= 0)
+                {
+                    chatHistoryText.Background = Brushes.Transparent;
+                }
+                else
+                {
+                    // Calculate opacity value with our scaling formula
+                    double scaledOpacity;
+                    if (bgOpacity >= 0.95)
+                    {
+                        scaledOpacity = 1.0;
+                    }
+                    else
+                    {
+                        scaledOpacity = 0.7 * Math.Sqrt(bgOpacity) + 0.3 * bgOpacity;
+                    }
+
+                    // Apply the background color to the ScrollViewer instead of RichTextBox
+                    chatScrollViewer.Background = new SolidColorBrush(Color.FromArgb(
+                        (byte)(scaledOpacity * 255),
+                        0, 0, 0));
+                    chatHistoryText.Background = Brushes.Transparent;
+                }
+
+                // Get the history from MainWindow
+                var mainWindowHistory = MainWindow.Instance.GetTranslationHistory();
+
+                // Get only the most recent entries for display (based on _maxHistorySize)
+                var displayHistory = mainWindowHistory.Reverse().Take(_maxHistorySize).Reverse();
+
+                // Get Min ChatBox Text Size setting
+                int minChatBoxTextSize = ConfigManager.Instance.GetChatBoxMinTextSize();
+
+                // Create a paragraph for each entry to display
+                foreach (var entry in displayHistory)
+                {
+
+                    // Skip entries with source text smaller than minimum size
+                    if (!string.IsNullOrEmpty(entry.OriginalText) && entry.OriginalText.Length < minChatBoxTextSize)
+                    {
+                        continue;
+                    }
+                    if(ConfigManager.Instance.IsAutoClearChatboxHistoryEnabled())
+                    {
+                        DateTime TimeNow = DateTime.Now;
+                        DateTime TimeLastEntry = entry.Timestamp;
+                        TimeSpan TimeDiff = TimeNow.Subtract(TimeLastEntry);
+                        if (TimeDiff.TotalSeconds > 1)
+                        {
+                            chatHistoryText.Document.Blocks.Clear();
+                            continue;
+                        }
+                    }
+
+                    // Create a new paragraph for this entry
+                    Paragraph para = new Paragraph();
+
+                    // Set paragraph properties - regular margins now that scrollbar is outside
+                    para.Margin = new Thickness(5, 10, 5, 10); // Add vertical spacing
+                    para.TextIndent = 0;
+                    para.LineHeight = Double.NaN; // Use default line height
+
+                    // Add original text based on display mode
+                    if ((_displayMode == 0 || _displayMode == 2) && !string.IsNullOrEmpty(entry.OriginalText))
+                    {
+                        // Create a run for the original text
+                        string originalText = entry.OriginalText;
+
+                        // Add RTL mark if source language is RTL
+                        if (isSourceRtl && !originalText.StartsWith('\u200F'))
+                        {
+                            originalText = "\u200F" + originalText;
+                        }
+
+                        Run originalRun = new Run(originalText);
+
+                        // Format it appropriately
+                        originalRun.Foreground = new SolidColorBrush(originalTextColor);
+                        originalRun.FontFamily = fontFamily;
+                        originalRun.FontSize = Math.Max(fontSize - 2, 10);
+
+                        // Set flow direction for the run
+                        originalRun.FlowDirection = isSourceRtl ?
+                            System.Windows.FlowDirection.RightToLeft :
+                            System.Windows.FlowDirection.LeftToRight;
+
+                        // Add it to the paragraph
+                        para.Inlines.Add(originalRun);
+
+                        // Add line breaks if there's also translated text to be shown
+                        if ((_displayMode == 0) && !string.IsNullOrEmpty(entry.TranslatedText))
+                        {
+                            para.Inlines.Add(new LineBreak());
+                            para.Inlines.Add(new LineBreak());
+                        }
+                    }
+
+                    // Add translated text based on display mode
+                    if ((_displayMode == 0 || _displayMode == 1) && !string.IsNullOrEmpty(entry.TranslatedText))
+                    {
+                        // Create a run for the translated text
+                        string translatedText = entry.TranslatedText;
+
+                        // Add RTL mark if target language is RTL
+                        if (isTargetRtl && !translatedText.StartsWith('\u200F'))
+                        {
+                            translatedText = "\u200F" + translatedText;
+                        }
+
+                        Run translatedRun = new Run(translatedText);
+
+                        // Format it appropriately
+                        translatedRun.Foreground = new SolidColorBrush(translatedTextColor);
+                        translatedRun.FontFamily = fontFamily;
+                        translatedRun.FontSize = fontSize;
+                        translatedRun.FontWeight = FontWeights.SemiBold;
+
+                        // Set flow direction for the run
+                        translatedRun.FlowDirection = isTargetRtl ?
+                            System.Windows.FlowDirection.RightToLeft :
+                            System.Windows.FlowDirection.LeftToRight;
+
+                        // Add it to the paragraph
+                        para.Inlines.Add(translatedRun);
+                    }
+
+                    // Set the flow direction for the entire paragraph based on content
+                    if ((_displayMode == 1 && isTargetRtl) ||
+                        (_displayMode == 2 && isSourceRtl) ||
+                        (_displayMode == 0 && isTargetRtl))
+                    {
+                        para.FlowDirection = System.Windows.FlowDirection.RightToLeft;
+                    }
+                    else
+                    {
+                        para.FlowDirection = System.Windows.FlowDirection.LeftToRight;
+                    }
+
+                    // Add the paragraph to the document
+                    chatHistoryText.Document.Blocks.Add(para);
+                }
+
+                // Scroll to the bottom to see newest entries
+                chatScrollViewer.ScrollToEnd();
+            });
+        }
+    }
+
+    public class TranslationEntry
+    {
+        public string OriginalText { get; set; } = string.Empty;
+        public string TranslatedText { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; }
+    }
+}

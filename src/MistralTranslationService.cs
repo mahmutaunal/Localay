@@ -1,0 +1,222 @@
+﻿using System;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace AlpWareStudio.Localay
+{
+    public class MistralTranslationService : ITranslationService
+    {
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+        /// <summary>Open the HTTPS connection before the first translation (see TranslationWarmUp).</summary>
+        internal static Task WarmUpConnectionAsync() =>
+            TranslationWarmUp.OpenConnectionsAsync(_httpClient, "Mistral", "https://api.mistral.ai/");
+        private static int _consecutiveFailures = 0;
+        private static int _retryCount = 0;
+        private static readonly object _keySwitchLock = new object();
+        private const int MAX_RETRIES = 3;
+        private int delayMS = 100;
+
+        /// <summary>
+        /// Check if error requires API key switch
+        /// </summary>
+        private bool ShouldSwitchApiKey(HttpStatusCode statusCode, string errorMessage)
+        {
+            // Switch key for quota/rate limit/invalid key errors
+            if (statusCode == HttpStatusCode.Unauthorized ||  // 401 - Invalid API key
+                (int)statusCode == 429 ||  // Too Many Requests - Rate limit
+                statusCode == HttpStatusCode.Forbidden)  // 403 - Quota exceeded
+            {
+                return true;
+            }
+
+            // Check error message for quota/rate limit keywords
+            string lowerMessage = errorMessage.ToLower();
+            if (lowerMessage.Contains("quota") ||
+                lowerMessage.Contains("rate limit") ||
+                lowerMessage.Contains("rate-limit") ||
+                lowerMessage.Contains("invalid api key") ||
+                lowerMessage.Contains("api key not found") ||
+                lowerMessage.Contains("api key invalid"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Get masked API key for logging (show only first 4 and last 4 characters)
+        /// </summary>
+        private string MaskApiKey(string apiKey)
+        {
+            if (string.IsNullOrEmpty(apiKey) || apiKey.Length < 8)
+                return "***";
+            return $"{apiKey.Substring(0, 4)}...{apiKey.Substring(apiKey.Length - 4)}";
+        }
+        
+        /// <summary>
+        /// Translate text using the Mistral API
+        /// </summary>
+        /// <param name="jsonData">The JSON data to translate</param>
+        /// <param name="prompt">The prompt to guide the translation</param>
+        /// <returns>The translation result as a JSON string or null if translation failed</returns>
+        public async Task<string?> TranslateAsync(string jsonData, string prompt)
+        {
+            string apiKey = ConfigManager.Instance.GetMistralApiKey();
+            string currenServices = ConfigManager.Instance.GetCurrentTranslationService();
+
+            // Check retry limit
+            if (_retryCount >= MAX_RETRIES)
+            {
+                Console.WriteLine($"Mistral API: Max retries ({MAX_RETRIES}) reached. Giving up.");
+                _retryCount = 0;
+                return null;
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    Console.WriteLine("Mistral API key not configured");
+                    return null;
+                }
+                // Get model from config
+                string model = ConfigManager.Instance.GetMistralModel();
+
+                var requestContent = new
+                {
+                    model = model,
+                    messages = new[]
+                    {
+                        new
+                        {
+                            role = "user",
+                            content = $"{prompt}\n{jsonData}"
+                        }
+                    }
+                };
+
+                var jsonOptions = new JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                string requestJson = JsonSerializer.Serialize(requestContent, jsonOptions);
+                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+
+                // Set the API key in the request header
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+
+                string url = "https://api.mistral.ai/v1/chat/completions";
+                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    // Reset consecutive failures counter on success
+                    _consecutiveFailures = 0;
+                    TranslationErrorNotifier.Reset("Mistral");
+                    _retryCount = 0;
+
+                    // Log the raw Mistral response before returning it
+                    LogManager.Instance.LogLlmReply(jsonResponse);
+
+                    return jsonResponse;
+                }
+                else
+                {
+                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    _consecutiveFailures++;
+                    Console.WriteLine($"Mistral API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
+
+                    // Check if we should switch API key
+                    if (ShouldSwitchApiKey(response.StatusCode, errorMessage))
+                    {
+                        string newApikey = null;
+                        lock (_keySwitchLock)
+                        {
+                            newApikey = ConfigManager.Instance.GetNextApiKey(currenServices, apiKey);
+                            if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
+                            {
+                                ConfigManager.Instance.SetMistralApiKey(newApikey);
+                                Console.WriteLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
+                                _retryCount++;
+                            }
+                            else
+                            {
+                                Console.WriteLine("No more API keys available to switch to");
+                            }
+                        }
+
+                        // Retry with new key (outside lock)
+                        if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
+                        {
+                            return await TranslateAsync(jsonData, prompt);
+                        }
+                    }
+                    try
+                    {
+                        using JsonDocument errorDoc = JsonDocument.Parse(errorMessage);
+                        if (errorDoc.RootElement.TryGetProperty("error", out JsonElement errorElement))
+                        {
+                            string detailedError = "";
+                            
+                            // Extract error message
+                            if (errorElement.TryGetProperty("message", out JsonElement messageElement))
+                            {
+                                detailedError = messageElement.GetString() ?? "";
+                            }
+                            // ignore error if it's a rate limit error
+                            if (_consecutiveFailures > 3)
+                            {
+                                // Write error to file
+                                System.IO.File.WriteAllText("mistral_last_error.txt", $"Mistral API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
+                                
+                                // Show error message to user
+                                TranslationErrorNotifier.ShowOnce("Mistral",
+                                    string.Format(LocalizationManager.Instance.Strings["Msg_MistralApiError"], detailedError),
+                                    LocalizationManager.Instance.Strings["Title_MistralError"]);
+                            }
+                            await Task.Delay(delayMS);
+                            return null;
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // If we can't parse as JSON, just use the raw message
+                    }
+                    if (_consecutiveFailures > 3)
+                    {
+                        // Write error to file
+                        System.IO.File.WriteAllText("mistral_last_error.txt", $"Mistral API error: {response.StatusCode}\n\nFull response: {errorMessage}");
+                        
+                        // Show general error if JSON parsing failed
+                        TranslationErrorNotifier.ShowOnce("Mistral",
+                            string.Format(LocalizationManager.Instance.Strings["Msg_MistralApiErrorStatus"], response.StatusCode, errorMessage),
+                            LocalizationManager.Instance.Strings["Title_MistralError"]);
+                    }
+                    await Task.Delay(delayMS);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Translation API error: {ex.Message}");
+                
+                // Write error to file
+                System.IO.File.WriteAllText("mistral_last_error.txt", $"Mistral API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+                
+                // Show error message to user
+                TranslationErrorNotifier.ShowOnce("Mistral",
+                    string.Format(LocalizationManager.Instance.Strings["Msg_MistralApiException"], ex.Message),
+                    LocalizationManager.Instance.Strings["Title_MistralError"]);
+                
+                return null;
+            }
+        }
+    }
+}

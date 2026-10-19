@@ -1,0 +1,284 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+
+namespace AlpWareStudio.Localay
+{
+    public class GeminiTranslationService : ITranslationService
+    {
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+
+        /// <summary>Open the HTTPS connection before the first translation (see TranslationWarmUp).</summary>
+        internal static Task WarmUpConnectionAsync() =>
+            TranslationWarmUp.OpenConnectionsAsync(_httpClient, "Gemini", "https://generativelanguage.googleapis.com/");
+        private static int _consecutiveFailures = 0;
+        private static int _retryCount = 0;
+        private static readonly object _keySwitchLock = new object();
+        private const int MAX_RETRIES = 3;
+        private int delayMS = 100;
+
+        /// <summary>
+        /// Check if error requires API key switch
+        /// </summary>
+        private bool ShouldSwitchApiKey(HttpStatusCode statusCode, string errorMessage)
+        {
+            // Switch key for quota/rate limit/invalid key errors
+            if (statusCode == HttpStatusCode.Unauthorized ||  // 401 - Invalid API key
+                (int)statusCode == 429 ||  // Too Many Requests - Rate limit
+                statusCode == HttpStatusCode.Forbidden)  // 403 - Quota exceeded
+            {
+                return true;
+            }
+
+            // Check error message for quota/rate limit keywords
+            string lowerMessage = errorMessage.ToLower();
+            if (lowerMessage.Contains("quota") ||
+                lowerMessage.Contains("rate limit") ||
+                lowerMessage.Contains("rate-limit") ||
+                lowerMessage.Contains("invalid api key") ||
+                lowerMessage.Contains("api key not found") ||
+                lowerMessage.Contains("api key invalid"))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        // Thinking settings tried in order, fastest first, until the model accepts one (see ReasoningFallback).
+        // thinkingLevel is used by Gemini 3.x (levels differ per model), thinkingBudget by 2.5; the last
+        // step sends nothing, for models without thinking control (e.g. Gemma).
+        private static readonly object?[] ThinkingOptions =
+        {
+            new { thinkingLevel = "minimal" },
+            new { thinkingLevel = "low" },
+            new { thinkingBudget = 0 },
+        };
+
+        // Log how many tokens went into thinking vs. the answer, to check that "prefer speed" works
+        private static void LogTokenUsage(string jsonResponse, string model)
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(jsonResponse);
+                if (doc.RootElement.TryGetProperty("usageMetadata", out JsonElement usage))
+                {
+                    int thoughts = usage.TryGetProperty("thoughtsTokenCount", out JsonElement t) ? t.GetInt32() : 0;
+                    int output = usage.TryGetProperty("candidatesTokenCount", out JsonElement c) ? c.GetInt32() : 0;
+                    int input = usage.TryGetProperty("promptTokenCount", out JsonElement p) ? p.GetInt32() : 0;
+                    OcrTiming.Log("Gemini tokens", $"{model}: input={input}, thinking={thoughts}, output={output}");
+                }
+            }
+            catch (Exception)
+            {
+                // Usage info is only for diagnostics
+            }
+        }
+
+        private static string Truncate(string text, int max) => text.Length <= max ? text : text.Substring(0, max) + "...";
+
+        /// <summary>
+        /// Get masked API key for logging (show only first 4 and last 4 characters)
+        /// </summary>
+        private string MaskApiKey(string apiKey)
+        {
+            if (string.IsNullOrEmpty(apiKey) || apiKey.Length < 8)
+                return "***";
+            return $"{apiKey.Substring(0, 4)}...{apiKey.Substring(apiKey.Length - 4)}";
+        }
+
+        /// <summary>
+        /// Translate text using the Gemini API
+        /// </summary>
+        /// <param name="jsonData">The JSON data to translate</param>
+        /// <param name="prompt">The prompt to guide the translation</param>
+        /// <returns>The translation result as a JSON string or null if translation failed</returns>
+        public async Task<string?> TranslateAsync(string jsonData, string prompt)
+        {
+            string apiKey = ConfigManager.Instance.GetGeminiApiKey();
+            string currenServices = ConfigManager.Instance.GetCurrentTranslationService();
+
+            // Check retry limit
+            if (_retryCount >= MAX_RETRIES)
+            {
+                Console.WriteLine($"Gemini API: Max retries ({MAX_RETRIES}) reached. Giving up.");
+                _retryCount = 0;
+                return null;
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(apiKey))
+                {
+                    Console.WriteLine("Gemini API key not configured");
+                    return null;
+                }
+
+                // Get model from config
+                string model = ConfigManager.Instance.GetGeminiModel();
+
+                var generationConfig = new Dictionary<string, object>
+                {
+                    ["response_mime_type"] = "text/plain",
+                };
+
+                // Prefer speed: translation rarely benefits from thinking, which can dominate the latency
+                string modelKey = "Gemini:" + model;
+                int thinkingStep = ReasoningFallback.GetStep(modelKey);
+                object? thinkingConfig = ConfigManager.Instance.IsLlmPreferSpeedEnabled() && thinkingStep < ThinkingOptions.Length
+                    ? ThinkingOptions[thinkingStep]
+                    : null;
+                if (thinkingConfig != null)
+                {
+                    generationConfig["thinkingConfig"] = thinkingConfig;
+                }
+
+                var requestContent = new
+                {
+                    contents = new[]
+                    {
+                        new
+                        {
+                            parts = new[]
+                            {
+                                new
+                                {
+                                    text = $"{prompt}\n{jsonData}"
+                                }
+                            }
+                        }
+                    },
+                    generationConfig
+                };
+
+                var jsonOptions = new JsonSerializerOptions
+                {
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+                };
+                string requestJson = JsonSerializer.Serialize(requestContent, jsonOptions);
+                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    // Reset consecutive failures counter on success
+                    _consecutiveFailures = 0;
+                    TranslationErrorNotifier.Reset("Gemini");
+                    _retryCount = 0;
+
+                    // Log the raw Gemini response before returning it
+                    LogManager.Instance.LogLlmReply(jsonResponse);
+                    LogTokenUsage(jsonResponse, model);
+
+                    return jsonResponse;
+                }
+                else
+                {
+                    string errorMessage = await response.Content.ReadAsStringAsync();
+
+                    // This model doesn't accept the thinking option we sent: try the next one
+                    if (thinkingConfig != null &&
+                        response.StatusCode == HttpStatusCode.BadRequest &&
+                        errorMessage.Contains("thinking", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ReasoningFallback.StepDown(modelKey, thinkingStep, $"HTTP 400: {Truncate(errorMessage, 200)}");
+                        return await TranslateAsync(jsonData, prompt);
+                    }
+                    _consecutiveFailures++;
+                    Console.WriteLine($"Gemini API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
+
+                    // Check if we should switch API key
+                    if (ShouldSwitchApiKey(response.StatusCode, errorMessage))
+                    {
+                        string newApikey = null;
+                        lock (_keySwitchLock)
+                        {
+                            newApikey = ConfigManager.Instance.GetNextApiKey(currenServices, apiKey);
+                            if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
+                            {
+                                ConfigManager.Instance.SetGeminiApiKey(newApikey);
+                                Console.WriteLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
+                                _retryCount++;
+                            }
+                            else
+                            {
+                                Console.WriteLine("No more API keys available to switch to");
+                            }
+                        }
+
+                        // Retry with new key (outside lock)
+                        if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
+                        {
+                            return await TranslateAsync(jsonData, prompt);
+                        }
+                    }
+
+                    // Parse error message
+                    try
+                    {
+                        using JsonDocument errorDoc = JsonDocument.Parse(errorMessage);
+                        if (errorDoc.RootElement.TryGetProperty("error", out JsonElement errorElement))
+                        {
+                            string detailedError = "";
+
+                            // Extract error message
+                            if (errorElement.TryGetProperty("message", out JsonElement messageElement))
+                            {
+                                detailedError = messageElement.GetString() ?? "";
+                            }
+                            // Show error if too many consecutive failures
+                            if (_consecutiveFailures > 3)
+                            {
+                                // Write error to file
+                                System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
+
+                                // Show error message to user
+                                TranslationErrorNotifier.ShowOnce("Gemini",
+                                    string.Format(LocalizationManager.Instance.Strings["Msg_GeminiApiError"], detailedError),
+                                    LocalizationManager.Instance.Strings["Title_GeminiError"]);
+                            }
+                            await Task.Delay(delayMS);
+                            return null;
+                        }
+                    }
+                    catch (JsonException)
+                    {
+                        // If we can't parse as JSON, just use the raw message
+                    }
+                    if (_consecutiveFailures > 3)
+                    {
+                        // Write error to file
+                        System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {response.StatusCode}\n\nFull response: {errorMessage}");
+
+                        // Show general error if JSON parsing failed
+                        TranslationErrorNotifier.ShowOnce("Gemini",
+                            string.Format(LocalizationManager.Instance.Strings["Msg_GeminiApiErrorStatus"], response.StatusCode, errorMessage),
+                            LocalizationManager.Instance.Strings["Title_GeminiError"]);
+                    }
+                    await Task.Delay(delayMS);
+                    return null;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Translation API error: {ex.Message}");
+
+                // Write error to file
+                System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+
+                // Show error message to user
+                TranslationErrorNotifier.ShowOnce("Gemini",
+                    string.Format(LocalizationManager.Instance.Strings["Msg_GeminiApiException"], ex.Message),
+                    LocalizationManager.Instance.Strings["Title_GeminiError"]);
+
+                return null;
+            }
+        }
+    }
+}

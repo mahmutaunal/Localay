@@ -1,0 +1,537 @@
+﻿using System;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.IO;
+using System.Security.Cryptography;
+using System.Globalization;
+
+namespace AlpWareStudio.Localay
+{
+    /// <summary>
+    /// Microsoft legacy translator using HMAC-based signature
+    /// </summary>
+    public class MicrosoftLegacyTranslationService : ITranslationService
+    {
+        private const string CombinedBlockSeparator = "##|||##";
+        // Shared across instances (a new service is created per translation) so connections are reused
+        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        private readonly string _singleKey;
+
+        // Default private key 
+        private static readonly byte[] _defaultPrivateKey = new byte[] {
+            0xA2,0x29,0x3A,0x3D,0xD0,0xDD,0x32,0x73,0x97,0x7A,0x64,0xDB,0xC2,0xF3,0x27,0xF5,
+            0xD7,0xBF,0x87,0xD9,0x45,0x9D,0xF0,0x5A,0x09,0x66,0xC6,0x30,0xC6,0x6A,0xAA,0x84,
+            0x9A,0x41,0xAA,0x94,0x3A,0xA8,0xD5,0x1A,0x6E,0x4D,0xAA,0xC9,0xA3,0x70,0x12,0x35,
+            0xC7,0xEB,0x12,0xF6,0xE8,0x23,0x07,0x9E,0x47,0x10,0x95,0x91,0x88,0x55,0xD8,0x17
+        };
+
+        public MicrosoftLegacyTranslationService()
+        {
+            _singleKey = ConfigManager.Instance.GetMicrosoftApiKey();
+        }
+
+        /// <summary>
+        /// Open the HTTPS connection to the translator host ahead of the first translation.
+        /// The first request otherwise pays DNS + TCP + TLS (measured 0.3-1.4 s vs ~0.1 s warm);
+        /// the shared client keeps the connection pooled, so the first real request reuses it.
+        /// Uses the public, unauthenticated languages endpoint. Never throws.
+        /// </summary>
+        internal static Task WarmUpConnectionAsync() =>
+            TranslationWarmUp.OpenConnectionsAsync(_httpClient, "Microsoft",
+                "https://api.cognitive.microsofttranslator.com/languages?api-version=3.0&scope=translation");
+
+        // Concurrency and retry/backoff tuning for rate limit handling
+        private static readonly int MaxConcurrentRequests = 2; // adjust if needed
+        private static readonly SemaphoreSlim _concurrencySemaphore = new SemaphoreSlim(MaxConcurrentRequests);
+        private static readonly Random _jitterRng = new Random();
+        private const int DefaultMaxRetries = 5; // total attempts
+        private const int BaseDelayMs = 500; // base for exponential backoff (ms)
+        private const int MaxDelayMs = 10000; // cap backoff at 10s so a rate limit cannot stall translation for minutes
+        // A 429 usually lasts longer than a few retries: give up after this many 429 attempts and
+        // skip all requests for the cooldown, instead of every translation retrying for ~15 s
+        private const int MaxRateLimitedAttempts = 2;
+        private static readonly TimeSpan RateLimitCooldown = TimeSpan.FromSeconds(30);
+        private static readonly object _cooldownLock = new object();
+        private static DateTime _rateLimitedUntilUtc = DateTime.MinValue;
+
+        internal static bool IsCoolingDown
+        {
+            get { lock (_cooldownLock) return DateTime.UtcNow < _rateLimitedUntilUtc; }
+        }
+
+        private static void StartCooldown(TimeSpan duration)
+        {
+            lock (_cooldownLock)
+            {
+                DateTime until = DateTime.UtcNow + duration;
+                if (until > _rateLimitedUntilUtc)
+                    _rateLimitedUntilUtc = until;
+            }
+            Console.WriteLine($"Microsoft translator rate limited, pausing requests for {duration.TotalSeconds:F0}s");
+        }
+
+        /// <summary>
+        /// Compute signature 
+        /// </summary>
+        internal static string ComputeSignature(string urlWithoutScheme, byte[] privateKey, DateTime utcNow, string? guid = null)
+        {
+            if (guid == null)
+            {
+                guid = Guid.NewGuid().ToString("N"); // no dashes
+            }
+
+            // Escape the url (encode reserved chars)
+            string escapedUrl = Uri.EscapeDataString(urlWithoutScheme);
+
+            // RFC1123-like format used in python code
+            string dateTime = utcNow.ToString("ddd, dd MMM yyyy HH:mm:ss 'GMT'", CultureInfo.InvariantCulture);
+
+            string canonical = ("MSTranslatorAndroidApp" + escapedUrl + dateTime + guid).ToLowerInvariant();
+            byte[] payload = Encoding.UTF8.GetBytes(canonical);
+
+            using (var hmac = new HMACSHA256(privateKey))
+            {
+                byte[] hash = hmac.ComputeHash(payload);
+                string signatureBase64 = Convert.ToBase64String(hash);
+                string signature = $"MSTranslatorAndroidApp::{signatureBase64}::{dateTime}::{guid}";
+                return signature;
+            }
+        }
+
+        // Map generic language names/codes to Microsoft Translator codes
+        internal static string MapToMicrosoftCode(string language)
+        {
+            if (string.IsNullOrWhiteSpace(language))
+                return language ?? "";
+
+            string l = language.Trim().ToLowerInvariant();
+            return l switch
+            {
+                "japanese" or "japan" or "ja" => "ja",
+                "english" or "en" => "en",
+                "chinese" or "zh" or "ch_sim" or "simplified chinese" => "zh-CN",
+                "traditional chinese" or "ch_tra" or "zh-tw" or "tw" => "zh-TW",
+                "korean" or "ko" => "ko",
+                "vietnamese" or "vi" => "vi",
+                "french" or "fr" => "fr",
+                "german" or "de" => "de",
+                "spanish" or "es" => "es",
+                "italian" or "it" => "it",
+                "portuguese" or "pt" => "pt",
+                "russian" or "ru" => "ru",
+                "hindi" or "hi" => "hi",
+                "indonesian" or "id" => "id",
+                "arabic" or "ar" => "ar",
+                "thai" or "th" => "th",
+                "dutch" or "nl" => "nl",
+                "polish" or "pl" => "pl",
+                "romanian" or "ro" => "ro",
+                "persian" or "fa" or "farsi" => "fa",
+                "czech" or "cs" => "cs",
+                "hungarian" or "hu" => "hu",
+                "sinhala" or "si" => "si",
+                "ukrainian" or "uk" => "uk",
+                "danish" or "da" => "da",
+                "finnish" or "fi" => "fi",
+                "central kurdish" or "ckb" => "ku",
+                "bengali" or "bn" => "bn",
+                "greek" or "el" => "el",
+                "hebrew" or "he" or "iw" => "he",
+                "auto" or "auto-detect" or "auto_detect" => "auto",
+                _ => language
+            };
+        }
+
+        /// <summary>
+        /// Translate: accepts the same JSON schema as other services and returns a result JSON or null on failure
+        /// </summary>
+        public async Task<string?> TranslateAsync(string jsonData, string prompt)
+        {
+            try
+            {
+                using JsonDocument doc = JsonDocument.Parse(jsonData);
+                JsonElement root = doc.RootElement;
+
+                string sourceLanguage = root.TryGetProperty("source_language", out JsonElement s) ? (s.GetString() ?? ConfigManager.Instance.GetSourceLanguage()) : ConfigManager.Instance.GetSourceLanguage();
+                string targetLanguage = root.TryGetProperty("target_language", out JsonElement t) ? (t.GetString() ?? ConfigManager.Instance.GetTargetLanguage()) : ConfigManager.Instance.GetTargetLanguage();
+
+                // Map languages to Microsoft expected codes (e.g., 'japanese' -> 'ja', 'chinese' -> 'zh-CN')
+                string mappedSource = MapToMicrosoftCode(sourceLanguage);
+                string mappedTarget = MapToMicrosoftCode(targetLanguage);
+
+                string host = "api.cognitive.microsofttranslator.com";
+                string apiVersion = "3.0";
+                string path = $"translate?api-version={apiVersion}&to={mappedTarget}";
+                if (!string.IsNullOrEmpty(mappedSource) && !string.Equals(mappedSource, "auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    path += $"&from={mappedSource}";
+                }
+
+                // urlWithoutScheme used for signature must be host + path (no scheme)
+                string urlForSignature = $"{host}/{path}";
+                byte[] privateKey = _defaultPrivateKey;
+
+                // allow override via config key
+                string overrideKey = ConfigManager.Instance.GetMicrosoftLegacySignatureKey();
+                if (!string.IsNullOrEmpty(overrideKey))
+                {
+                    try
+                    {
+                        // interpret as hex string or base64 - try hex first
+                        if (overrideKey.StartsWith("0x") || overrideKey.Contains(" ") == false && overrideKey.Length % 2 == 0)
+                        {
+                            // Try parse hex
+                            int len = overrideKey.Length;
+                            byte[] parsed = new byte[len / 2];
+                            for (int i = 0; i < len; i += 2)
+                                parsed[i / 2] = Convert.ToByte(overrideKey.Substring(i, 2), 16);
+                            privateKey = parsed;
+                        }
+                        else
+                        {
+                            // fallback to base64
+                            privateKey = Convert.FromBase64String(overrideKey);
+                        }
+                    }
+                    catch
+                    {
+                        Console.WriteLine("Failed to parse override Microsoft legacy signature key; using embedded default.");
+                    }
+                }
+
+                // Prepare response JSON writer
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                using var memoryStream = new MemoryStream();
+                using var outputJson = new Utf8JsonWriter(memoryStream);
+
+                outputJson.WriteStartObject();
+                outputJson.WritePropertyName("translations");
+                outputJson.WriteStartArray();
+
+                if (root.TryGetProperty("text_blocks", out JsonElement textBlocks))
+                {
+                    foreach (JsonElement block in textBlocks.EnumerateArray())
+                    {
+                        string originalText = block.TryGetProperty("text", out JsonElement textEl) ? (textEl.GetString() ?? "") : "";
+                        string blockId = block.TryGetProperty("id", out JsonElement idEl) ? (idEl.GetString() ?? "") : "";
+
+                        if (string.IsNullOrWhiteSpace(originalText))
+                        {
+                            continue;
+                        }
+
+                        string? translated = await TranslatePreservingSeparatorsAsync(originalText, urlForSignature, privateKey);
+                        if (translated == null)
+                        {
+                            return null;
+                        }
+
+                        // Write output element
+                        outputJson.WriteStartObject();
+                        outputJson.WriteString("id", blockId);
+                        outputJson.WriteString("original_text", originalText);
+                        outputJson.WriteString("translated_text", translated);
+                        outputJson.WriteEndObject();
+
+                        Console.WriteLine($"Microsoft translated: '{originalText}' -> '{translated}'");
+                    }
+                }
+
+                outputJson.WriteEndArray();
+                outputJson.WriteEndObject();
+                outputJson.Flush();
+                string result = Encoding.UTF8.GetString(memoryStream.ToArray());
+                Console.WriteLine($"Microsoft Translate final JSON result: { (result.Length>100? result.Substring(0,100) + "..." : result)}");
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in MicrosoftLegacyTranslationService: {ex.Message}");
+                try
+                {
+                    File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), ex.ToString());
+                }
+                catch { }
+                return null;
+            }
+        }
+
+        private async Task<string?> TranslatePreservingSeparatorsAsync(string text, string urlForSignature, byte[] privateKey)
+        {
+            try
+            {
+                if (!text.Contains(CombinedBlockSeparator, StringComparison.Ordinal))
+                {
+                    return await TranslateSingleTextAsync(text, urlForSignature, privateKey);
+                }
+
+                string[] originalParts = text.Split(new[] { CombinedBlockSeparator }, StringSplitOptions.None);
+                string[] translatedParts = new string[originalParts.Length];
+                var translatableParts = new List<string>();
+                var partMap = new List<int>(originalParts.Length);
+
+                for (int i = 0; i < originalParts.Length; i++)
+                {
+                    string normalizedPart = NormalizeText(originalParts[i]);
+                    if (string.IsNullOrWhiteSpace(normalizedPart))
+                    {
+                        partMap.Add(-1);
+                        continue;
+                    }
+
+                    partMap.Add(translatableParts.Count);
+                    translatableParts.Add(normalizedPart);
+                }
+
+                if (translatableParts.Count == 0)
+                {
+                    return text;
+                }
+
+                List<string>? translatedBatch = await TranslateBatchAsync(translatableParts, urlForSignature, privateKey);
+                if (translatedBatch == null)
+                {
+                    return null;
+                }
+
+                for (int i = 0; i < originalParts.Length; i++)
+                {
+                    int translatedIndex = partMap[i];
+                    if (translatedIndex < 0 || translatedIndex >= translatedBatch.Count)
+                    {
+                        translatedParts[i] = originalParts[i];
+                        continue;
+                    }
+
+                    string translatedPart = translatedBatch[translatedIndex];
+                    translatedParts[i] = string.IsNullOrWhiteSpace(translatedPart) ? originalParts[i] : translatedPart;
+                }
+
+                Console.WriteLine($"Microsoft preserved separator across {translatedParts.Length} block(s)");
+                return string.Join(CombinedBlockSeparator, translatedParts);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error preserving Microsoft separators: {ex.Message}");
+                return null;
+            }
+        }
+
+        private async Task<string?> TranslateSingleTextAsync(string text, string urlForSignature, byte[] privateKey)
+        {
+            string normalizedText = NormalizeText(text);
+            if (string.IsNullOrWhiteSpace(normalizedText))
+            {
+                return text;
+            }
+
+            List<string>? results = await TranslateBatchAsync(new[] { normalizedText }, urlForSignature, privateKey);
+            if (results == null)
+            {
+                return null;
+            }
+
+            return results.Count > 0 ? results[0] : string.Empty;
+        }
+
+        private async Task<List<string>?> TranslateBatchAsync(IReadOnlyList<string> texts, string urlForSignature, byte[] privateKey)
+        {
+            if (texts.Count == 0)
+            {
+                return new List<string>();
+            }
+
+            string jsonRequest = JsonSerializer.Serialize(texts.Select(text => new { Text = text }));
+            HttpResponseMessage? response = null;
+
+            try
+            {
+                response = await SendWithRetriesAsync(urlForSignature, privateKey, jsonRequest, DefaultMaxRetries);
+                if (response == null)
+                {
+                    Console.WriteLine("Microsoft translator failed after retries");
+                    return null;
+                }
+            }
+            catch (Exception exSend)
+            {
+                string debug = $"Exception sending request after retries: {exSend}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}";
+                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_request.txt"), debug); } catch { }
+                Console.WriteLine($"Microsoft translator request failed: {exSend.Message}");
+                return null;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                string err = await response.Content.ReadAsStringAsync();
+                string debug = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}\nResponse: {err}";
+
+                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), err); } catch { }
+                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_request.txt"), debug); } catch { }
+
+                Console.WriteLine($"Microsoft translator HTTP error: {response.StatusCode}");
+                return null;
+            }
+
+            string jsonResponse = await response.Content.ReadAsStringAsync();
+            try
+            {
+                using JsonDocument respDoc = JsonDocument.Parse(jsonResponse);
+                var results = new List<string>(respDoc.RootElement.GetArrayLength());
+                foreach (JsonElement responseItem in respDoc.RootElement.EnumerateArray())
+                {
+                    string translated = string.Empty;
+                    if (responseItem.TryGetProperty("translations", out JsonElement transArr) &&
+                        transArr.GetArrayLength() > 0 &&
+                        transArr[0].TryGetProperty("text", out JsonElement ttext))
+                    {
+                        translated = ttext.GetString() ?? string.Empty;
+                    }
+
+                    results.Add(translated);
+                }
+
+                return results;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error parsing Microsoft response: {ex.Message}");
+                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), jsonResponse); } catch { }
+                return null;
+            }
+        }
+
+        private string NormalizeText(string text)
+        {
+            string normalizedText = text.Replace("\r\n", " ").Replace("\n", " ");
+            while (normalizedText.Contains("  "))
+            {
+                normalizedText = normalizedText.Replace("  ", " ");
+            }
+
+            return normalizedText.Trim();
+        }
+
+        // Send request with retries, exponential backoff, jitter and respecting Retry-After header
+        private async Task<HttpResponseMessage?> SendWithRetriesAsync(string urlForSignature, byte[] privateKey, string jsonRequest, int maxRetries)
+        {
+            if (IsCoolingDown)
+            {
+                Console.WriteLine("Microsoft translator is rate limited, skipping request");
+                return null;
+            }
+
+            await _concurrencySemaphore.WaitAsync();
+            try
+            {
+                for (int attempt = 1; attempt <= maxRetries; attempt++)
+                {
+                    string guid = Guid.NewGuid().ToString("N");
+                    DateTime utcNow = DateTime.UtcNow;
+                    string signature = ComputeSignature(urlForSignature, privateKey, utcNow, guid);
+
+                    var request = new HttpRequestMessage(HttpMethod.Post, $"https://{urlForSignature}");
+                    request.Headers.Remove("X-MT-Signature");
+                    request.Headers.Add("X-MT-Signature", signature);
+                    request.Content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
+
+                    HttpResponseMessage response = null!;
+                    try
+                    {
+                        response = await _httpClient.SendAsync(request);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Network error - consider retrying
+                        Console.WriteLine($"Send attempt {attempt} failed: {ex.Message}");
+                        if (attempt == maxRetries)
+                        {
+                            throw; // bubble up to caller to handle logging
+                        }
+                        else
+                        {
+                            int delayMs = CalculateBackoffMs(attempt);
+                            await Task.Delay(delayMs);
+                            continue;
+                        }
+                    }
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        return response;
+                    }
+
+                    int status = (int)response.StatusCode;
+                    if (status == 429)
+                    {
+                        // Respect Retry-After if provided
+                        int delayMs = CalculateBackoffMs(attempt);
+                        TimeSpan? retryAfter = response.Headers.RetryAfter?.Delta
+                            ?? (response.Headers.RetryAfter?.Date - DateTimeOffset.UtcNow);
+                        if (retryAfter.HasValue)
+                        {
+                            double retryAfterMs = Math.Max(0, retryAfter.Value.TotalMilliseconds);
+
+                            // Waiting longer than the cap would hold the semaphore and stall every
+                            // later translation, so give up on this request instead
+                            if (retryAfterMs > MaxDelayMs)
+                            {
+                                Console.WriteLine($"Received 429 with Retry-After {retryAfterMs:F0}ms (> {MaxDelayMs}ms), giving up");
+                                StartCooldown(TimeSpan.FromMilliseconds(retryAfterMs));
+                                return response;
+                            }
+
+                            delayMs = Math.Max(delayMs, (int)retryAfterMs);
+                        }
+
+                        if (attempt >= Math.Min(maxRetries, MaxRateLimitedAttempts))
+                        {
+                            Console.WriteLine($"Received 429, attempt {attempt}, giving up");
+                            StartCooldown(retryAfter.HasValue && retryAfter.Value > RateLimitCooldown ? retryAfter.Value : RateLimitCooldown);
+                            return response;
+                        }
+
+                        // Log and wait
+                        Console.WriteLine($"Received 429, attempt {attempt}, waiting {delayMs}ms before retry");
+                        await Task.Delay(delayMs);
+                        continue;
+                    }
+                    else if (status >= 500 && status < 600)
+                    {
+                        // Server errors - retry with backoff
+                        if (attempt == maxRetries)
+                        {
+                            return response;
+                        }
+                        int delayMs = CalculateBackoffMs(attempt);
+                        Console.WriteLine($"Server error {status}, attempt {attempt}, waiting {delayMs}ms before retry");
+                        await Task.Delay(delayMs);
+                        continue;
+                    }
+                    else
+                    {
+                        // Client error (4xx other than 429) - do not retry
+                        return response;
+                    }
+                }
+
+                return null;
+            }
+            finally
+            {
+                _concurrencySemaphore.Release();
+            }
+        }
+
+        private int CalculateBackoffMs(int attempt)
+        {
+            // exponential backoff with jitter: base * 2^(attempt-1) capped, jitter factor 0.5-1.5
+            double exponential = BaseDelayMs * Math.Pow(2, attempt - 1);
+            double jitterFactor = 0.5 + _jitterRng.NextDouble();
+            int ms = (int)Math.Min(MaxDelayMs, exponential * jitterFactor);
+            return ms;
+        }
+    }
+}
