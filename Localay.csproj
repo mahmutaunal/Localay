@@ -1,15 +1,16 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>Localay</AssemblyName>
-    <OutputPath>app</OutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
     <RootNamespace>AlpWareStudio.Localay</RootNamespace>
@@ -17,15 +18,7 @@
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
     <ApplicationIcon>media\AppIcon.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <!--
-      PublishSingleFile=true would bundle all managed DLLs (including
-      Microsoft.ML.OnnxRuntime.dll) into a single Localay.exe (~190 MB).
-      This breaks the ONNX Runtime native loader path on first launch and
-      causes the app to crash when the user has tts_service=Supertonic.
-      Multi-file self-contained publish keeps every DLL next to Localay.exe,
-      which matches the layout that works for both `dotnet build` and
-      `dotnet publish` outputs.
-    -->
+    <!-- Keep a portable multi-file layout for the native OCR library. -->
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <ApplicationManifest>app.manifest</ApplicationManifest>
@@ -42,7 +35,6 @@
     <Copyright>Copyright © 2026 AlpWare Studio. Based on RSTGameTranslation (GPL-3.0).</Copyright>
 
     <!-- Include PDB for deterministic builds — AV engines trust binaries with debug info -->
-    <!-- Note: CsWinRT IIDOptimizer requires a separate PDB file, so use 'portable' not 'embedded' -->
     <DebugType>portable</DebugType>
     <DebugSymbols>true</DebugSymbols>
 
@@ -59,17 +51,8 @@
 
   <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
-    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.20.1" />
-    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.0.6" />
-    <PackageReference Include="NAudio" Version="2.2.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="org.k2fsa.sherpa.onnx" Version="1.13.4" />
     <PackageReference Include="System.Management" Version="7.0.1" />
-    <PackageReference Include="System.Speech" Version="9.0.9" />
-    <PackageReference Include="Whisper.net" Version="1.9.0" />
-    <PackageReference Include="Whisper.net.Runtime" Version="1.9.0" />
-    <PackageReference Include="Whisper.net.Runtime.Cuda.Windows" Version="1.9.0" />
-    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.0" />
   </ItemGroup>
   
   <ItemGroup>
@@ -78,6 +61,8 @@
     <ApplicationDefinition Include="src\App.xaml" />
     <Page Include="src\**\*.xaml" Exclude="src\App.xaml" />
     <None Include="app.manifest" />
+    <None Update="app\Languages\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="Languages\%(Filename)%(Extension)" />
+    <None Update="app\OneOcr\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
   </ItemGroup>
   
   <ItemGroup>

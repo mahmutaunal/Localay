@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
@@ -20,7 +20,6 @@ using System.Globalization;
 using System.Windows.Forms;
 using System.Windows.Interop;
 using RST;
-using Windows.Media.SpeechSynthesis;
 using System.IO;
 
 namespace AlpWareStudio.Localay
@@ -183,8 +182,6 @@ namespace AlpWareStudio.Localay
             LocalizationManager.Instance.PropertyChanged += (s, e) => LoadExcludeRegions();
             LoadAvailableScreens();
             LoadAllProfile();
-            LoadAllAudioProcessingModel();
-            LoadAvailableWindowTTSVoice();
 
             // Add Loaded event handler to ensure controls are initialized
             this.Loaded += SettingsWindow_Loaded;
@@ -205,8 +202,7 @@ namespace AlpWareStudio.Localay
             _instance = this;
             LoadAvailableScreens();
             LoadAllProfile();
-            // LoadAllAudioProcessingModel();
-            LoadAvailableWindowTTSVoice();
+
             SettingsWindow_Loaded(null, null);
         }
 
@@ -280,180 +276,12 @@ namespace AlpWareStudio.Localay
                 ConfigManager.Instance.SetOcrMethod(configOcrMethod);
                 ConfigManager.Instance.SetTranslationService(configTransService);
 
-                // NOTE: do not build a speech engine here. This used to call
-                // localWhisperService.Instance.CreateEngine().Initialize() when the provider was
-                // FunASR, which loaded the whole SenseVoice ONNX model (239 MB int8 / 938 MB fp32)
-                // synchronously on the UI thread — so the Settings window did not appear until the
-                // load finished. The engine was also never stored or disposed, so each time
-                // Settings opened it leaked another native recognizer. The engine that actually
-                // gets used is created by StartServiceAsync when audio capture starts.
-
                 Console.WriteLine("Settings window fully loaded and initialized. Changes will now be saved.");
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error initializing Settings window: {ex.Message}");
                 _isInitializing = false; // Ensure we don't get stuck in initialization mode
-            }
-        }
-
-        // Load list of available window TTS voice
-        private void LoadAvailableWindowTTSVoice()
-        {
-            try
-            {
-                // Clear any existing items
-                windowTTSVoiceComboBox.Items.Clear();
-
-                // Get all available voices from WindowsTTSService
-                var availableVoices = WindowsTTSService.GetInstalledVoiceNames();
-
-                if (availableVoices.Count == 0)
-                {
-                    // Add a placeholder item if no voices are available
-                    ComboBoxItem noVoicesItem = new ComboBoxItem
-                    {
-                        Content = "No voices available",
-                        IsEnabled = false
-                    };
-                    windowTTSVoiceComboBox.Items.Add(noVoicesItem);
-                    Console.WriteLine("No Windows TTS voices found");
-                }
-                else
-                {
-                    // Group voices by language
-                    var groupedVoices = new Dictionary<string, List<string>>();
-
-                    foreach (string voiceName in availableVoices)
-                    {
-                        // Extract language information from voice
-                        string languageCode = "Other";
-
-
-                        int startIndex = voiceName.IndexOf('(');
-                        if (startIndex > 0)
-                        {
-                            int endIndex = voiceName.IndexOf(',', startIndex);
-                            if (endIndex > startIndex)
-                            {
-                                languageCode = voiceName.Substring(startIndex + 1, endIndex - startIndex - 1).Trim();
-                            }
-                        }
-
-                        // Add to group
-                        if (!groupedVoices.ContainsKey(languageCode))
-                        {
-                            groupedVoices[languageCode] = new List<string>();
-                        }
-                        groupedVoices[languageCode].Add(voiceName);
-                    }
-
-                    // Prefer show VN language
-                    List<string> languagePriority = new List<string> { "vi-VN", "Vietnamese" };
-
-                    foreach (string priorityLang in languagePriority)
-                    {
-                        if (groupedVoices.ContainsKey(priorityLang))
-                        {
-                            foreach (string voiceName in groupedVoices[priorityLang])
-                            {
-                                ComboBoxItem item = new ComboBoxItem
-                                {
-                                    Content = voiceName
-                                };
-                                windowTTSVoiceComboBox.Items.Add(item);
-                            }
-                            groupedVoices.Remove(priorityLang);
-                        }
-                    }
-
-                    foreach (var group in groupedVoices)
-                    {
-                        foreach (string voiceName in group.Value)
-                        {
-                            ComboBoxItem item = new ComboBoxItem
-                            {
-                                Content = voiceName
-                            };
-                            windowTTSVoiceComboBox.Items.Add(item);
-                        }
-                    }
-
-                    // Try to select the current voice from config
-                    string currentVoice = ConfigManager.Instance.GetWindowsTtsVoice();
-                    bool foundVoice = false;
-
-                    // First try to find an exact match
-                    foreach (ComboBoxItem item in windowTTSVoiceComboBox.Items)
-                    {
-                        if (string.Equals(item.Content?.ToString(), currentVoice, StringComparison.OrdinalIgnoreCase))
-                        {
-                            windowTTSVoiceComboBox.SelectedItem = item;
-                            foundVoice = true;
-                            Console.WriteLine($"Selected voice from config: {currentVoice}");
-                            break;
-                        }
-                    }
-
-                    // If the configured voice wasn't found, try to find a Vietnamese voice
-                    if (!foundVoice)
-                    {
-                        foreach (ComboBoxItem item in windowTTSVoiceComboBox.Items)
-                        {
-                            string? itemContent = item.Content?.ToString();
-                            if (itemContent != null &&
-                                (itemContent.Contains("Vietnamese") ||
-                                itemContent.Contains("vi-VN") ||
-                                itemContent.Contains("An")))
-                            {
-                                windowTTSVoiceComboBox.SelectedItem = item;
-                                foundVoice = true;
-                                Console.WriteLine($"Selected Vietnamese voice: {itemContent}");
-                                break;
-                            }
-                        }
-                    }
-
-                    // If still no voice selected, try to get the default system voice
-                    if (!foundVoice)
-                    {
-                        string? defaultVoice = WindowsTTSService.GetDefaultSystemVoice();
-
-                        if (!string.IsNullOrEmpty(defaultVoice))
-                        {
-                            foreach (ComboBoxItem item in windowTTSVoiceComboBox.Items)
-                            {
-                                if (string.Equals(item.Content?.ToString(), defaultVoice, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    windowTTSVoiceComboBox.SelectedItem = item;
-                                    foundVoice = true;
-                                    Console.WriteLine($"Selected default system voice: {defaultVoice}");
-                                    break;
-                                }
-                            }
-                        }
-
-                        // If still no voice selected, select the first one
-                        if (!foundVoice && windowTTSVoiceComboBox.Items.Count > 0)
-                        {
-                            windowTTSVoiceComboBox.SelectedIndex = 0;
-                            ComboBoxItem? firstItem = windowTTSVoiceComboBox.SelectedItem as ComboBoxItem;
-                            Console.WriteLine($"Selected first available voice: {firstItem?.Content}");
-                        }
-                    }
-                }
-
-                Console.WriteLine($"Loaded {availableVoices.Count} Windows TTS voices");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading Windows TTS voices: {ex.Message}");
-                MessageBox.Show(
-                    string.Format(LocalizationManager.Instance.Strings["Msg_ErrorLoadingTTSVoices"], ex.Message),
-                    LocalizationManager.Instance.Strings["Title_Error"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
             }
         }
 
@@ -493,7 +321,6 @@ namespace AlpWareStudio.Localay
                         Content = screenInfo,
                         Tag = i  // Store screen index as Tag
                     };
-
 
                     screenComboBox.Items.Add(item);
 
@@ -583,7 +410,6 @@ namespace AlpWareStudio.Localay
                     deviceIndex++;
                     device.cb = Marshal.SizeOf(device);
                 }
-
 
                 try
                 {
@@ -701,7 +527,6 @@ namespace AlpWareStudio.Localay
                         passwordBox.Password = "";
 
                         Console.WriteLine($"Added new API key for {serviceType}");
-
 
                         MessageBox.Show(
                             string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], serviceType),
@@ -1012,65 +837,6 @@ namespace AlpWareStudio.Localay
             translationCacheCheckBox.IsChecked = ConfigManager.Instance.IsTranslationCacheEnabled();
             translationPrefetchCheckBox.IsChecked = ConfigManager.Instance.IsTranslationPrefetchEnabled();
 
-            // Set audio option
-            silenceThresholdTextBox.Text = ConfigManager.Instance.GetSilenceThreshold().ToString(CultureInfo.InvariantCulture);
-            silenceDurationTextBox.Text = ConfigManager.Instance.GetSilenceDurationMs().ToString(CultureInfo.InvariantCulture);
-            maxBufferSamplesTextBox.Text = ConfigManager.Instance.GetMaxBufferSamples().ToString(CultureInfo.InvariantCulture);
-            whisperThreadCountTextBox.Text = ConfigManager.Instance.GetWhisperThreadCount().ToString(CultureInfo.InvariantCulture);
-            SelectComboBoxItemByTag(audioCaptureModeComboBox, ConfigManager.Instance.GetAudioCaptureMode());
-            SelectComboBoxItemByTag(vadModeComboBox, ConfigManager.Instance.GetAudioVadMode());
-            sileroThresholdTextBox.Text = ConfigManager.Instance.GetSileroVadThreshold().ToString("0.##", CultureInfo.InvariantCulture);
-            whisperReducedContextCheckBox.IsChecked = ConfigManager.Instance.GetWhisperReducedAudioContext();
-
-            audioProcessingModelComboBox.SelectionChanged -= AudioProcessingModelComboBox_SelectionChanged;
-
-            // Set audio processing model (provider-specific: whisper *.bin name or FunASR model folder name)
-            string savedAudioModel = string.Equals(ConfigManager.Instance.GetAudioProcessingProvider(), "FunASR", StringComparison.OrdinalIgnoreCase)
-                ? ConfigManager.Instance.GetFunAsrModel()
-                : ConfigManager.Instance.GetAudioProcessingModel();
-            foreach (var item in audioProcessingModelComboBox.Items)
-            {
-                string itemText = "";
-                if (item is ComboBoxItem cbItem)
-                {
-                    itemText = cbItem.Content?.ToString() ?? "";
-                }
-                else
-                {
-                    itemText = item.ToString() ?? "";
-                }
-                if (string.Equals(itemText.Trim(), savedAudioModel, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"Found matching audio processing model: '{itemText}'");
-                    audioProcessingModelComboBox.SelectedItem = item;
-                    UpdateWhisperThreadCountVisibility(itemText);
-                    break;
-                }
-            }
-
-            // If config holds a stale/legacy value (e.g. a file name), fall back to the first available model
-            if (audioProcessingModelComboBox.SelectedItem == null && audioProcessingModelComboBox.Items.Count > 0)
-            {
-                audioProcessingModelComboBox.SelectedIndex = 0;
-            }
-
-            audioProcessingModelComboBox.SelectionChanged += AudioProcessingModelComboBox_SelectionChanged;
-
-            // Set Whisper runtime from config
-            whisperRuntimeComboBox.SelectionChanged -= WhisperRuntimeComboBox_SelectionChanged;
-            string savedRuntime = ConfigManager.Instance.GetWhisperRuntime();
-            foreach (var item in whisperRuntimeComboBox.Items)
-            {
-                if (item is ComboBoxItem cbItem && string.Equals(cbItem.Tag?.ToString(), savedRuntime, StringComparison.OrdinalIgnoreCase))
-                {
-                    whisperRuntimeComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-            // Set initial visibility for thread count (only show for CPU)
-            UpdateWhisperThreadCountVisibility(savedRuntime);
-            whisperRuntimeComboBox.SelectionChanged += WhisperRuntimeComboBox_SelectionChanged;
-
             // Set manga mode
             MangaModeCheckBox.IsChecked = ConfigManager.Instance.IsMangaModeEnabled();
 
@@ -1116,7 +882,6 @@ namespace AlpWareStudio.Localay
             // Temporarily remove event handlers to prevent triggering changes
             blockDetectionPowerTextBox.LostFocus -= BlockDetectionPowerTextBox_LostFocus;
             settleTimeTextBox.LostFocus -= SettleTimeTextBox_LostFocus;
-
 
             blockDetectionPowerTextBox.Text = BlockDetectionManager.Instance.GetBlockDetectionScale().ToString("F2", CultureInfo.InvariantCulture);
             settleTimeTextBox.Text = ConfigManager.Instance.GetBlockDetectionSettleTime().ToString("F2", CultureInfo.InvariantCulture);
@@ -1173,143 +938,11 @@ namespace AlpWareStudio.Localay
             // Load the current service's prompt
             LoadCurrentServicePrompt();
 
-            // Load TTS settings
-
-            // Temporarily remove TTS event handlers
-            ttsEnabledCheckBox.Checked -= TtsEnabledCheckBox_CheckedChanged;
-            ttsEnabledCheckBox.Unchecked -= TtsEnabledCheckBox_CheckedChanged;
-            ttsServiceComboBox.SelectionChanged -= TtsServiceComboBox_SelectionChanged;
-            elevenLabsVoiceComboBox.SelectionChanged -= ElevenLabsVoiceComboBox_SelectionChanged;
-            googleTtsVoiceComboBox.SelectionChanged -= GoogleTtsVoiceComboBox_SelectionChanged;
-            windowTTSVoiceComboBox.SelectionChanged -= WindowTTSVoiceComboBox_SelectionChanged;
-            if (supertonicVoiceStyleComboBox != null)
-                supertonicVoiceStyleComboBox.SelectionChanged -= SupertonicVoiceStyleComboBox_SelectionChanged;
-
-            // Set TTS enabled state
-            ttsEnabledCheckBox.IsChecked = ConfigManager.Instance.IsTtsEnabled();
-
-            // Set Exclude character name
-            excludeCharacterNameCheckBox.IsChecked = ConfigManager.Instance.IsExcludeCharacterNameEnabled();
-
-            // Windows TTS speech rate and auto speed-up
-            windowsTtsRateSlider.Value = WindowsTTSService.GetSpeechRate();
-            windowsTtsRateValueText.Text = WindowsTTSService.GetSpeechRate().ToString(CultureInfo.InvariantCulture);
-            ttsAutoSpeedUpCheckBox.IsChecked = ConfigManager.Instance.IsTtsAutoSpeedUpEnabled();
-
-            // Set TTS service
-            string ttsService = ConfigManager.Instance.GetTtsService();
-            foreach (ComboBoxItem item in ttsServiceComboBox.Items)
-            {
-                if (string.Equals(item.Content.ToString(), ttsService, StringComparison.OrdinalIgnoreCase))
-                {
-                    ttsServiceComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-
-            // Update service-specific settings visibility
-            UpdateTtsServiceSpecificSettings(ttsService);
-
-            // Set ElevenLabs API key
-            elevenLabsApiKeyPasswordBox.Password = ConfigManager.Instance.GetElevenLabsApiKey();
-
-            // Set ElevenLabs voice
-            string elevenLabsVoiceId = ConfigManager.Instance.GetElevenLabsVoice();
-            foreach (ComboBoxItem item in elevenLabsVoiceComboBox.Items)
-            {
-                if (string.Equals(item.Tag?.ToString(), elevenLabsVoiceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    elevenLabsVoiceComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-
-            // Set Window TTS voice
-            string windowTTSvoiceId = ConfigManager.Instance.GetWindowsTtsVoice();
-            foreach (ComboBoxItem item in windowTTSVoiceComboBox.Items)
-            {
-                if (string.Equals(item.Tag?.ToString(), windowTTSvoiceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    windowTTSVoiceComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-
-            // Set Google TTS API key
-            googleTtsApiKeyPasswordBox.Password = ConfigManager.Instance.GetGoogleTtsApiKey();
-
-            // Set Google TTS voice
-            string googleVoiceId = ConfigManager.Instance.GetGoogleTtsVoice();
-            foreach (ComboBoxItem item in googleTtsVoiceComboBox.Items)
-            {
-                if (string.Equals(item.Tag?.ToString(), googleVoiceId, StringComparison.OrdinalIgnoreCase))
-                {
-                    googleTtsVoiceComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-
-            // Re-attach TTS event handlers
-            ttsEnabledCheckBox.Checked += TtsEnabledCheckBox_CheckedChanged;
-            ttsEnabledCheckBox.Unchecked += TtsEnabledCheckBox_CheckedChanged;
-            ttsServiceComboBox.SelectionChanged += TtsServiceComboBox_SelectionChanged;
-            elevenLabsVoiceComboBox.SelectionChanged += ElevenLabsVoiceComboBox_SelectionChanged;
-            googleTtsVoiceComboBox.SelectionChanged += GoogleTtsVoiceComboBox_SelectionChanged;
-            windowTTSVoiceComboBox.SelectionChanged += WindowTTSVoiceComboBox_SelectionChanged;
-            if (supertonicVoiceStyleComboBox != null)
-                supertonicVoiceStyleComboBox.SelectionChanged += SupertonicVoiceStyleComboBox_SelectionChanged;
-
-            // Refresh Supertonic model status / voice list (so the user can
-            // see at a glance whether the on-device model is ready, even if
-            // Supertonic isn't currently the selected service).
-            if (supertonicModelStatusText != null) RefreshSupertonicModelStatus();
-            if (supertonicVoiceStyleComboBox != null) LoadSupertonicVoiceStyles();
-
             // Load ignore phrases
             LoadIgnorePhrases();
 
             // Load exclude regions
             LoadExcludeRegions();
-
-            // Audio Processing settings — select provider from config (normalized: "Whisper" or "FunASR")
-            string savedProvider = ConfigManager.Instance.GetAudioProcessingProvider();
-            foreach (var item in audioProcessingProviderComboBox.Items)
-            {
-                if (item is ComboBoxItem cbItem && (cbItem.Content?.ToString() ?? "").StartsWith(savedProvider, StringComparison.OrdinalIgnoreCase))
-                {
-                    audioProcessingProviderComboBox.SelectedItem = cbItem;
-                    break;
-                }
-            }
-            if (audioProcessingProviderComboBox.SelectedItem == null && audioProcessingProviderComboBox.Items.Count > 0)
-            {
-                audioProcessingProviderComboBox.SelectedIndex = 0;
-            }
-            UpdateProviderDependentVisibility();
-
-            // Load FunASR language + precision selections
-            string funasrLang = ConfigManager.Instance.GetFunAsrLanguage();
-            foreach (var item in funAsrLanguageComboBox.Items)
-            {
-                if (item is ComboBoxItem cb && string.Equals(cb.Tag?.ToString(), funasrLang, StringComparison.OrdinalIgnoreCase))
-                {
-                    funAsrLanguageComboBox.SelectedItem = cb;
-                    break;
-                }
-            }
-            string funasrPrec = ConfigManager.Instance.GetFunAsrModelPrecision();
-            foreach (var item in funAsrPrecisionComboBox.Items)
-            {
-                if (item is ComboBoxItem cb && string.Equals(cb.Tag?.ToString(), funasrPrec, StringComparison.OrdinalIgnoreCase))
-                {
-                    funAsrPrecisionComboBox.SelectedItem = cb;
-                    break;
-                }
-            }
-
-            // openAiRealtimeApiKeyPasswordBox.Password = ConfigManager.Instance.GetOpenAiRealtimeApiKey();
-            // Load Auto-translate for audio service
-            // audioServiceAutoTranslateCheckBox.IsChecked = ConfigManager.Instance.IsAudioServiceAutoTranslateEnabled();
 
             // Load Clipboard Auto-Translate settings
             clipboardAutoTranslateCheckBox.IsChecked = ConfigManager.Instance.IsClipboardAutoTranslateEnabled();
@@ -1317,7 +950,6 @@ namespace AlpWareStudio.Localay
             clipboardDebounceTextBox.Text = ConfigManager.Instance.GetClipboardDebounceMs().ToString();
             clipboardMaxCharsTextBox.Text = ConfigManager.Instance.GetClipboardMaxChars().ToString();
         }
-
 
         // ----- HotKeys tab -----
 
@@ -1333,7 +965,6 @@ namespace AlpWareStudio.Localay
             ("Clear Selected Area", "Lbl_ClearSelectedArea", "hotKeyClearPreviousArea"),
             ("Show Area", "Lbl_ShowAreaBorder", "hotKeyShowArea"),
             ("ChatBox", "Lbl_ToggleChatBox", "hotKeyChatBox"),
-            ("Audio Service", "Btn_AudioService", "hotKeyAudio"),
             ("Area 1", "Lbl_SelectArea1", "hotKeyArea1"),
             ("Area 2", "Lbl_SelectArea2", "hotKeyArea2"),
             ("Area 3", "Lbl_SelectArea3", "hotKeyArea3"),
@@ -2390,158 +2021,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void UpdateTtsServiceSpecificSettings(string selectedService)
-        {
-            try
-            {
-                bool isElevenLabsSelected = selectedService == "ElevenLabs";
-                bool isGoogleTtsSelected = selectedService == "Google Cloud TTS";
-                bool isWindowTtsSelected = selectedService == "Windows TTS";
-                bool isSupertonicSelected = selectedService == "Supertonic";
-
-                // Make sure the window is fully loaded and controls are initialized
-                if (elevenLabsApiKeyLabel == null || elevenLabsApiKeyGrid == null ||
-                    elevenLabsApiKeyHelpText == null || elevenLabsVoiceLabel == null ||
-                    elevenLabsVoiceComboBox == null || googleTtsApiKeyLabel == null ||
-                    googleTtsApiKeyGrid == null || googleTtsVoiceLabel == null ||
-                    googleTtsVoiceComboBox == null || windowTTSVoiceLabel == null || windowTTSVoiceComboBox == null)
-                {
-                    Console.WriteLine("TTS UI elements not initialized yet. Skipping visibility update.");
-                    return;
-                }
-
-                // Init combobox window TTS
-
-
-                // Show/hide ElevenLabs-specific settings
-                elevenLabsApiKeyLabel.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsApiKeyGrid.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsApiKeyHelpText.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsVoiceLabel.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsVoiceComboBox.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsModelLabel.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-                elevenLabsModelComboBox.Visibility = isElevenLabsSelected ? Visibility.Visible : Visibility.Collapsed;
-
-                // Hide custom voice controls when ElevenLabs is not selected
-                if (!isElevenLabsSelected)
-                {
-                    elevenLabsCustomVoiceLabel.Visibility = Visibility.Collapsed;
-                    elevenLabsCustomVoiceTextBox.Visibility = Visibility.Collapsed;
-                }
-
-                // Show/hide Google TTS-specific settings
-                googleTtsApiKeyLabel.Visibility = isGoogleTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                googleTtsApiKeyGrid.Visibility = isGoogleTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                googleTtsVoiceLabel.Visibility = isGoogleTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                googleTtsVoiceComboBox.Visibility = isGoogleTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-
-                // Show/hide Window TTS-specific settings
-                windowTTSVoiceLabel.Visibility = isWindowTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                windowTTSVoiceComboBox.Visibility = isWindowTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                windowsTTSGuide.Visibility = isWindowTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                windowsTtsRateLabel.Visibility = isWindowTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-                windowsTtsRateGrid.Visibility = isWindowTtsSelected ? Visibility.Visible : Visibility.Collapsed;
-
-                // Show/hide Supertonic TTS-specific settings
-                if (supertonicSettingsGroupBox != null)
-                {
-                    supertonicSettingsGroupBox.Visibility = isSupertonicSelected ? Visibility.Visible : Visibility.Collapsed;
-                }
-                // Load service-specific settings if they're being shown
-                if (isElevenLabsSelected)
-                {
-                    elevenLabsApiKeyPasswordBox.Password = ConfigManager.Instance.GetElevenLabsApiKey();
-
-                    // Set selected voice - check if it's a preset or custom
-                    string voiceId = ConfigManager.Instance.GetElevenLabsVoice();
-                    bool foundPreset = false;
-                    foreach (ComboBoxItem item in elevenLabsVoiceComboBox.Items)
-                    {
-                        if (item.Tag?.ToString() != "custom" && string.Equals(item.Tag?.ToString(), voiceId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            elevenLabsVoiceComboBox.SelectedItem = item;
-                            foundPreset = true;
-                            elevenLabsCustomVoiceLabel.Visibility = Visibility.Collapsed;
-                            elevenLabsCustomVoiceTextBox.Visibility = Visibility.Collapsed;
-                            break;
-                        }
-                    }
-                    // If not a preset voice, select "Custom" and show the textbox
-                    if (!foundPreset && !string.IsNullOrWhiteSpace(voiceId))
-                    {
-                        foreach (ComboBoxItem item in elevenLabsVoiceComboBox.Items)
-                        {
-                            if (item.Tag?.ToString() == "custom")
-                            {
-                                elevenLabsVoiceComboBox.SelectedItem = item;
-                                break;
-                            }
-                        }
-                        elevenLabsCustomVoiceTextBox.Text = voiceId;
-                        elevenLabsCustomVoiceLabel.Visibility = Visibility.Visible;
-                        elevenLabsCustomVoiceTextBox.Visibility = Visibility.Visible;
-                    }
-
-                    // Set selected model
-                    string modelId = ConfigManager.Instance.GetElevenLabsModel();
-                    foreach (ComboBoxItem item in elevenLabsModelComboBox.Items)
-                    {
-                        if (string.Equals(item.Tag?.ToString(), modelId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            elevenLabsModelComboBox.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
-                else if (isGoogleTtsSelected)
-                {
-                    googleTtsApiKeyPasswordBox.Password = ConfigManager.Instance.GetGoogleTtsApiKey();
-
-                    // Set selected voice
-                    string voiceId = ConfigManager.Instance.GetGoogleTtsVoice();
-                    foreach (ComboBoxItem item in googleTtsVoiceComboBox.Items)
-                    {
-                        if (string.Equals(item.Tag?.ToString(), voiceId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            googleTtsVoiceComboBox.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
-                else if (isWindowTtsSelected)
-                {
-                    // Set selected voice
-                    string voiceId = ConfigManager.Instance.GetWindowsTtsVoice();
-                    foreach (ComboBoxItem item in windowTTSVoiceComboBox.Items)
-                    {
-                        if (string.Equals(item.Content?.ToString(), voiceId, StringComparison.OrdinalIgnoreCase))
-                        {
-                            windowTTSVoiceComboBox.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
-                else if (isSupertonicSelected)
-                {
-                    // Supertonic - on-device, no API key needed
-                    RefreshSupertonicModelStatus();
-                    LoadSupertonicVoiceStyles();
-                    if (supertonicTotalStepsTextBox != null)
-                        supertonicTotalStepsTextBox.Text =
-                            ConfigManager.Instance.GetSupertonicTotalSteps()
-                                .ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    if (supertonicSpeedTextBox != null)
-                        supertonicSpeedTextBox.Text =
-                            ConfigManager.Instance.GetSupertonicSpeed()
-                                .ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating TTS service-specific settings: {ex.Message}");
-            }
-        }
-
         // Gemini API Key changed
         private void GeminiApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
@@ -2700,7 +2179,6 @@ namespace AlpWareStudio.Localay
 
             string sanitizedModel = ollamaModelTextBox.Text.Trim();
 
-
             // Save valid model to config
             ConfigManager.Instance.SetOllamaModel(sanitizedModel);
             Console.WriteLine($"Ollama model set to: {sanitizedModel}");
@@ -2768,7 +2246,6 @@ namespace AlpWareStudio.Localay
                 return;
 
             string sanitizedModel = lmstudioModelTextBox.Text.Trim();
-
 
             // Save valid model to config
             ConfigManager.Instance.SetLMStudioModel(sanitizedModel);
@@ -3102,268 +2579,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void AudioProcessingModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (localWhisperService.Instance.IsRunning)
-                {
-                   MessageBoxResult result = MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_WhisperServiceRunning"],
-                        LocalizationManager.Instance.Strings["Title_Confirm"],
-                        MessageBoxButton.OKCancel,
-                        MessageBoxImage.Warning
-                    );
-                    if (result == MessageBoxResult.Cancel)
-                    {
-                        if (e.RemovedItems.Count > 0)
-                        {
-                            _isInitializing = true; 
-                            
-                            audioProcessingModelComboBox.SelectedItem = e.RemovedItems[0];
-                            
-                            _isInitializing = false;
-                        }
-                        return;
-                    }
-                    else
-                    {
-                        localWhisperService.Instance.Stop();
-                        audioServiceAutoTranslateCheckBox.IsChecked = false;
-                    }
-                }
-
-                string model = (audioProcessingModelComboBox.SelectedItem as ComboBoxItem)?.Content?.ToString()
-                               ?? audioProcessingModelComboBox.SelectedItem?.ToString()
-                               ?? "ggml-tiny";
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config (provider-specific key)
-                    if (string.Equals(ConfigManager.Instance.GetAudioProcessingProvider(), "FunASR", StringComparison.OrdinalIgnoreCase))
-                    {
-                        ConfigManager.Instance.SetFunAsrModel(model);
-                        Console.WriteLine($"FunASR model set to: {model}");
-                    }
-                    else
-                    {
-                        ConfigManager.Instance.SetAudioProcessingModel(model);
-                        Console.WriteLine($"Audio processing model set from text input to: {model}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating audio processing model from text input: {ex.Message}");
-            }
-        }
-
-        private void WhisperRuntimeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string newRuntime = (whisperRuntimeComboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "cpu";
-                string currentRuntime = ConfigManager.Instance.GetWhisperRuntime();
-
-                // Update thread count visibility (only show for CPU)
-                UpdateWhisperThreadCountVisibility(newRuntime);
-                
-                // if no change, do nothing
-                if (string.Equals(newRuntime, currentRuntime, StringComparison.OrdinalIgnoreCase))
-                    return;
-
-                // Notify that changing runtime requires app restart
-                MessageBoxResult result = MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_WhisperRuntimeChangeRequiresRestart"],
-                    LocalizationManager.Instance.Strings["Title_Confirm"],
-                    MessageBoxButton.OKCancel,
-                    MessageBoxImage.Information
-                );
-                
-                if (result == MessageBoxResult.Cancel)
-                {
-                    // Revert selection
-                    if (e.RemovedItems.Count > 0)
-                    {
-                        _isInitializing = true;
-                        whisperRuntimeComboBox.SelectedItem = e.RemovedItems[0];
-                        // Also revert visibility
-                        string revertedRuntime = (e.RemovedItems[0] as ComboBoxItem)?.Tag?.ToString() ?? "cpu";
-                        UpdateWhisperThreadCountVisibility(revertedRuntime);
-                        _isInitializing = false;
-                    }
-                    return;
-                }
-
-                // If Whisper is running, stop it
-                if (localWhisperService.Instance.IsRunning)
-                {
-                    localWhisperService.Instance.Stop();
-                    audioServiceAutoTranslateCheckBox.IsChecked = false;
-                }
-
-                // Save new runtime
-                ConfigManager.Instance.SetWhisperRuntime(newRuntime);
-                Console.WriteLine($"Whisper runtime set to: {newRuntime} (requires app restart to take effect)");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Whisper runtime: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Show/hide CPU thread count controls based on runtime selection.
-        /// Thread count only applies to CPU mode, not GPU (CUDA/Vulkan).
-        /// </summary>
-        private void UpdateWhisperThreadCountVisibility(string runtime)
-        {
-            bool isCpu = string.Equals(runtime, "cpu", StringComparison.OrdinalIgnoreCase);
-            Visibility visibility = isCpu ? Visibility.Visible : Visibility.Collapsed;
-            
-            whisperThreadCountLabel.Visibility = visibility;
-            whisperThreadCountTextBox.Visibility = visibility;
-            whisperThreadCountTip.Visibility = visibility;
-        }
-
-        /// <summary>
-        /// Show/hide audio settings rows depending on the selected provider.
-        /// - Whisper: shows runtime (CPU/CUDA/Vulkan) row; thread count per runtime.
-        /// - FunASR: CPU-only, hides the whisper runtime row; thread count always visible
-        ///   (reused as the sherpa-onnx thread count).
-        /// </summary>
-        private void UpdateProviderDependentVisibility()
-        {
-            bool isFunAsr = string.Equals(ConfigManager.Instance.GetAudioProcessingProvider(), "FunASR", StringComparison.OrdinalIgnoreCase);
-            Visibility whisperOnly = isFunAsr ? Visibility.Collapsed : Visibility.Visible;
-
-            whisperRuntimeLabel.Visibility = whisperOnly;
-            whisperRuntimeComboBox.Visibility = whisperOnly;
-            whisperRuntimeTip.Visibility = whisperOnly;
-
-            if (isFunAsr)
-            {
-                whisperThreadCountLabel.Visibility = Visibility.Visible;
-                whisperThreadCountTextBox.Visibility = Visibility.Visible;
-                whisperThreadCountTip.Visibility = Visibility.Visible;
-                if (funAsrDownloadButton != null) funAsrDownloadButton.Visibility = Visibility.Visible;
-                if (whisperDownloadButton != null) whisperDownloadButton.Visibility = Visibility.Collapsed;
-                if (funAsrLanguageLabel != null) funAsrLanguageLabel.Visibility = Visibility.Visible;
-                if (funAsrLanguageComboBox != null) funAsrLanguageComboBox.Visibility = Visibility.Visible;
-                if (funAsrPrecisionLabel != null) funAsrPrecisionLabel.Visibility = Visibility.Visible;
-                if (funAsrPrecisionComboBox != null) funAsrPrecisionComboBox.Visibility = Visibility.Visible;
-                RefreshFunAsrModelStatus();
-            }
-            else
-            {
-                UpdateWhisperThreadCountVisibility(ConfigManager.Instance.GetWhisperRuntime());
-                if (funAsrDownloadButton != null) funAsrDownloadButton.Visibility = Visibility.Collapsed;
-                if (whisperDownloadButton != null) whisperDownloadButton.Visibility = Visibility.Visible;
-                if (funAsrLanguageLabel != null) funAsrLanguageLabel.Visibility = Visibility.Collapsed;
-                if (funAsrLanguageComboBox != null) funAsrLanguageComboBox.Visibility = Visibility.Collapsed;
-                if (funAsrPrecisionLabel != null) funAsrPrecisionLabel.Visibility = Visibility.Collapsed;
-                if (funAsrPrecisionComboBox != null) funAsrPrecisionComboBox.Visibility = Visibility.Collapsed;
-                RefreshWhisperModelStatus();
-            }
-        }
-
-        /// <summary>
-        /// Show the "no model installed" hint only while app/AudioModel has no *.bin at all.
-        /// Mirrors RefreshFunAsrModelStatus().
-        /// </summary>
-        private void RefreshWhisperModelStatus()
-        {
-            if (audioModelDownloadTextBlock == null) return;
-            try
-            {
-                bool installed = WhisperModelDownloader.IsAnyModelInstalled();
-                audioModelDownloadTextBlock.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"RefreshWhisperModelStatus error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Update the FunASR download button label and download hint visibility
-        /// based on whether a SenseVoice model is already installed.
-        /// Mirrors RefreshSupertonicModelStatus().
-        /// </summary>
-        private void RefreshFunAsrModelStatus()
-        {
-            if (funAsrDownloadButton == null || audioModelDownloadTextBlock == null) return;
-            try
-            {
-                bool installed = FunAsrModelDownloader.IsModelInstalled();
-                funAsrDownloadButton.Content = installed
-                    ? LocalizationManager.Instance.Strings["Btn_RedownloadFunAsrModel"]
-                    : LocalizationManager.Instance.Strings["Btn_DownloadFunAsrModel"];
-                // Hide the "download from URL" hint once a model is installed; show it when missing
-                audioModelDownloadTextBlock.Visibility = installed ? Visibility.Collapsed : Visibility.Visible;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"RefreshFunAsrModelStatus error: {ex.Message}");
-            }
-        }
-
-        // FunASR language hint selection
-        private void FunAsrLanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            try
-            {
-                if (funAsrLanguageComboBox?.SelectedItem is ComboBoxItem item)
-                {
-                    string lang = item.Tag?.ToString() ?? "auto";
-                    ConfigManager.Instance.SetFunAsrLanguage(lang);
-                    // If the audio service is running, it must be restarted to pick up the new language
-                    if (localWhisperService.Instance.IsRunning)
-                    {
-                        localWhisperService.Instance.Stop();
-                        audioServiceAutoTranslateCheckBox.IsChecked = false;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating FunASR language: {ex.Message}");
-            }
-        }
-
-        // FunASR model precision (fp32 / int8) selection
-        private void FunAsrPrecisionComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            try
-            {
-                if (funAsrPrecisionComboBox?.SelectedItem is ComboBoxItem item)
-                {
-                    string precision = item.Tag?.ToString() ?? "fp32";
-                    ConfigManager.Instance.SetFunAsrModelPrecision(precision);
-                    // If the audio service is running, it must be restarted to load the other model file
-                    if (localWhisperService.Instance.IsRunning)
-                    {
-                        localWhisperService.Instance.Stop();
-                        audioServiceAutoTranslateCheckBox.IsChecked = false;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating FunASR precision: {ex.Message}");
-            }
-        }
-
         private void CustomApiModelTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
             try
@@ -3540,20 +2755,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void ElevenLabsApiLink_Click(object sender, RoutedEventArgs e)
-        {
-            OpenUrl("https://elevenlabs.io/app/api-key");
-        }
-
-        private void GoogleTtsApiLink_Click(object sender, RoutedEventArgs e)
-        {
-            OpenUrl("https://cloud.google.com/text-to-speech");
-        }
-        private void NaturalVoiceSAPIAdapterLink_Click(object sender, RoutedEventArgs e)
-        {
-            OpenUrl("https://github.com/gexgd0419/NaturalVoiceSAPIAdapter");
-        }
-
         private void OpenUrl(string url)
         {
             try
@@ -3570,502 +2771,6 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Error opening URL: {ex.Message}");
                 MessageBox.Show($"Unable to open URL: {url}\n\nError: {ex.Message}",
                     "Error Opening URL", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        // Text-to-Speech settings handlers
-
-        private void TtsEnabledCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                bool isEnabled = ttsEnabledCheckBox.IsChecked ?? false;
-                ConfigManager.Instance.SetTtsEnabled(isEnabled);
-                Console.WriteLine($"TTS enabled: {isEnabled}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating TTS enabled state: {ex.Message}");
-            }
-        }
-
-        private void TtsServiceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (ttsServiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string service = selectedItem.Content.ToString() ?? "ElevenLabs";
-                    ConfigManager.Instance.SetTtsService(service);
-                    Console.WriteLine($"TTS service set to: {service}");
-
-                    // Update UI for the selected service
-                    UpdateTtsServiceSpecificSettings(service);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating TTS service: {ex.Message}");
-            }
-        }
-
-        // ==================== Supertonic TTS handlers ====================
-
-        private void RefreshSupertonicModelStatus()
-        {
-            if (supertonicModelStatusText == null) return;
-            try
-            {
-                bool installed = SupertonicTTSService.IsModelInstalled();
-                if (installed)
-                {
-                    supertonicModelStatusText.Text = "✓ Installed";
-                    supertonicModelStatusText.Foreground =
-                        System.Windows.Media.Brushes.Green;
-                    if (supertonicDownloadButton != null)
-                    {
-                        supertonicDownloadButton.Content = "Re-download";
-                    }
-                }
-                else
-                {
-                    supertonicModelStatusText.Text = "✗ Not installed (≈400 MB required)";
-                    supertonicModelStatusText.Foreground =
-                        System.Windows.Media.Brushes.Red;
-                    if (supertonicDownloadButton != null)
-                    {
-                        supertonicDownloadButton.Content = "Download model";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                supertonicModelStatusText.Text = "Error: " + ex.Message;
-                supertonicModelStatusText.Foreground =
-                    System.Windows.Media.Brushes.Red;
-            }
-        }
-
-        private void LoadSupertonicVoiceStyles()
-        {
-            if (supertonicVoiceStyleComboBox == null) return;
-            try
-            {
-                supertonicVoiceStyleComboBox.Items.Clear();
-                var styles = SupertonicTTSService.GetInstalledVoiceStyles();
-                if (styles.Count == 0)
-                {
-                    var noItem = new ComboBoxItem
-                    {
-                        Content = "(download model first)",
-                        IsEnabled = false
-                    };
-                    supertonicVoiceStyleComboBox.Items.Add(noItem);
-                    return;
-                }
-                foreach (var name in styles)
-                {
-                    supertonicVoiceStyleComboBox.Items.Add(new ComboBoxItem { Content = name });
-                }
-                // Select current
-                string current = ConfigManager.Instance.GetSupertonicVoiceStyle();
-                foreach (ComboBoxItem item in supertonicVoiceStyleComboBox.Items)
-                {
-                    if (string.Equals(item.Content?.ToString(), current, StringComparison.OrdinalIgnoreCase))
-                    {
-                        supertonicVoiceStyleComboBox.SelectedItem = item;
-                        return;
-                    }
-                }
-                if (supertonicVoiceStyleComboBox.Items.Count > 0)
-                    supertonicVoiceStyleComboBox.SelectedIndex = 0;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"LoadSupertonicVoiceStyles error: {ex.Message}");
-            }
-        }
-
-        private async void SupertonicDownloadButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (supertonicDownloadButton != null) supertonicDownloadButton.IsEnabled = false;
-                var downloader = new SupertonicModelDownloader();
-                bool ok = await downloader.DownloadAsync();
-                if (ok)
-                {
-                    // Re-enable the "model missing" notice so any future
-                    // SpeakText error after the install will be reported.
-                    SupertonicTTSService.ResetMissingModelNotice();
-
-                    MessageBox.Show(
-                        "Supertonic model downloaded successfully.\n\nYou can now use Supertonic as a TTS service.",
-                        "Download complete", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                RefreshSupertonicModelStatus();
-                LoadSupertonicVoiceStyles();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Error: {ex.Message}", "Download error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                if (supertonicDownloadButton != null) supertonicDownloadButton.IsEnabled = true;
-            }
-        }
-
-        // ==================== Whisper model download ====================
-
-        /// <summary>
-        /// Open the model picker, then select whatever was downloaded so the user does not have to
-        /// find it in the dropdown afterwards.
-        /// </summary>
-        private void WhisperDownloadButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (whisperDownloadButton != null) whisperDownloadButton.IsEnabled = false;
-
-                var picker = new WhisperModelPickerWindow { Owner = this };
-                picker.ShowDialog();
-
-                string? downloaded = picker.DownloadedModelBaseName;
-                if (!string.IsNullOrEmpty(downloaded))
-                {
-                    // Rebuild the dropdown so the new *.bin shows up, then select it.
-                    LoadAllAudioProcessingModel();
-
-                    foreach (var item in audioProcessingModelComboBox.Items)
-                    {
-                        if (item is ComboBoxItem cb &&
-                            string.Equals(cb.Content?.ToString(), downloaded, StringComparison.OrdinalIgnoreCase))
-                        {
-                            audioProcessingModelComboBox.SelectedItem = cb;
-                            break;
-                        }
-                    }
-                    if (audioProcessingModelComboBox.SelectedItem == null &&
-                        audioProcessingModelComboBox.Items.Count > 0)
-                    {
-                        audioProcessingModelComboBox.SelectedIndex = 0;
-                    }
-                }
-
-                RefreshWhisperModelStatus();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Error: {ex.Message}", "Download error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                if (whisperDownloadButton != null) whisperDownloadButton.IsEnabled = true;
-            }
-        }
-
-        // ==================== FunASR model download ====================
-
-        private async void FunAsrDownloadButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (funAsrDownloadButton != null) funAsrDownloadButton.IsEnabled = false;
-                var downloader = new FunAsrModelDownloader();
-                bool ok = await downloader.DownloadAsync();
-                if (ok)
-                {
-                    // Auto-select the freshly downloaded model
-                    ConfigManager.Instance.SetFunAsrModel("(FunASR root)");
-                    LoadAllAudioProcessingModel();
-                    // Select the root item if present
-                    foreach (var item in audioProcessingModelComboBox.Items)
-                    {
-                        if (item is ComboBoxItem cb && (cb.Content?.ToString() ?? "") == "(FunASR root)")
-                        {
-                            audioProcessingModelComboBox.SelectedItem = cb;
-                            break;
-                        }
-                    }
-                    if (audioProcessingModelComboBox.SelectedItem == null && audioProcessingModelComboBox.Items.Count > 0)
-                    {
-                        audioProcessingModelComboBox.SelectedIndex = 0;
-                    }
-
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_FunAsrDownloadComplete"],
-                        LocalizationManager.Instance.Strings["Msg_DownloadComplete"], MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-                RefreshFunAsrModelStatus();
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show(
-                    $"Error: {ex.Message}", "Download error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-            finally
-            {
-                if (funAsrDownloadButton != null) funAsrDownloadButton.IsEnabled = true;
-            }
-        }
-
-        private void SupertonicVoiceStyleComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                if (_isInitializing) return;
-                if (supertonicVoiceStyleComboBox?.SelectedItem is ComboBoxItem item)
-                {
-                    string name = item.Content?.ToString() ?? "M1";
-                    if (!string.IsNullOrWhiteSpace(name) && name != "(download model first)")
-                    {
-                        ConfigManager.Instance.SetSupertonicVoiceStyle(name);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SupertonicVoiceStyleComboBox_SelectionChanged: {ex.Message}");
-            }
-        }
-
-        private void SupertonicTotalStepsTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (supertonicTotalStepsTextBox == null) return;
-                if (int.TryParse(supertonicTotalStepsTextBox.Text, out int v))
-                {
-                    ConfigManager.Instance.SetSupertonicTotalSteps(v);
-                    supertonicTotalStepsTextBox.Text =
-                        ConfigManager.Instance.GetSupertonicTotalSteps()
-                            .ToString(System.Globalization.CultureInfo.InvariantCulture);
-                }
-                else
-                {
-                    // restore
-                    supertonicTotalStepsTextBox.Text =
-                        ConfigManager.Instance.GetSupertonicTotalSteps()
-                            .ToString(System.Globalization.CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SupertonicTotalStepsTextBox_LostFocus: {ex.Message}");
-            }
-        }
-
-        private void SupertonicSpeedTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (supertonicSpeedTextBox == null) return;
-                if (float.TryParse(supertonicSpeedTextBox.Text,
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture, out float v))
-                {
-                    ConfigManager.Instance.SetSupertonicSpeed(v);
-                    supertonicSpeedTextBox.Text =
-                        ConfigManager.Instance.GetSupertonicSpeed()
-                            .ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-                }
-                else
-                {
-                    supertonicSpeedTextBox.Text =
-                        ConfigManager.Instance.GetSupertonicSpeed()
-                            .ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SupertonicSpeedTextBox_LostFocus: {ex.Message}");
-            }
-        }
-
-        private void SupertonicHomepageLink_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "https://github.com/supertone-inc/supertonic",
-                    UseShellExecute = true
-                });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"SupertonicHomepageLink_Click: {ex.Message}");
-            }
-        }
-
-        private void GoogleTtsApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string apiKey = googleTtsApiKeyPasswordBox.Password.Trim();
-                ConfigManager.Instance.SetGoogleTtsApiKey(apiKey);
-                Console.WriteLine("Google TTS API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Google TTS API key: {ex.Message}");
-            }
-        }
-
-        private void GoogleTtsVoiceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (googleTtsVoiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string voiceId = selectedItem.Tag?.ToString() ?? "ja-JP-Neural2-B"; // Default to Female A
-                    ConfigManager.Instance.SetGoogleTtsVoice(voiceId);
-                    Console.WriteLine($"Google TTS voice set to: {selectedItem.Content} (ID: {voiceId})");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Google TTS voice: {ex.Message}");
-            }
-        }
-
-        private void ElevenLabsApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string apiKey = elevenLabsApiKeyPasswordBox.Password.Trim();
-                ConfigManager.Instance.SetElevenLabsApiKey(apiKey);
-                Console.WriteLine("ElevenLabs API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ElevenLabs API key: {ex.Message}");
-            }
-        }
-
-        private void ElevenLabsVoiceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (elevenLabsVoiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string tag = selectedItem.Tag?.ToString() ?? "";
-
-                    // Handle custom voice selection
-                    if (tag == "custom")
-                    {
-                        // Show custom voice input
-                        elevenLabsCustomVoiceLabel.Visibility = Visibility.Visible;
-                        elevenLabsCustomVoiceTextBox.Visibility = Visibility.Visible;
-                        // Don't save "custom" as voice ID - the textbox handler will save the actual ID
-                        Console.WriteLine("Custom voice selected - enter voice ID in the textbox");
-                    }
-                    else
-                    {
-                        // Hide custom voice input and save the preset voice ID
-                        elevenLabsCustomVoiceLabel.Visibility = Visibility.Collapsed;
-                        elevenLabsCustomVoiceTextBox.Visibility = Visibility.Collapsed;
-                        ConfigManager.Instance.SetElevenLabsVoice(tag);
-                        Console.WriteLine($"ElevenLabs voice set to: {selectedItem.Content} (ID: {tag})");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ElevenLabs voice: {ex.Message}");
-            }
-        }
-
-        private void ElevenLabsCustomVoiceTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string voiceId = elevenLabsCustomVoiceTextBox.Text.Trim();
-                if (!string.IsNullOrWhiteSpace(voiceId))
-                {
-                    ConfigManager.Instance.SetElevenLabsVoice(voiceId);
-                    Console.WriteLine($"ElevenLabs custom voice ID set to: {voiceId}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ElevenLabs custom voice: {ex.Message}");
-            }
-        }
-
-        private void ElevenLabsModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (elevenLabsModelComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string modelId = selectedItem.Tag?.ToString() ?? "eleven_flash_v2_5";
-                    ConfigManager.Instance.SetElevenLabsModel(modelId);
-                    Console.WriteLine($"ElevenLabs model set to: {selectedItem.Content} (ID: {modelId})");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ElevenLabs model: {ex.Message}");
-            }
-        }
-
-        private void WindowTTSVoiceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (windowTTSVoiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string voiceId = selectedItem.Content?.ToString() ?? "Microsoft David (en-US, Male)";
-                    ConfigManager.Instance.SetWindowsTtsVoice(voiceId);
-                    Console.WriteLine($"Windows TTS voice set to: {selectedItem.Content} (ID: {voiceId})");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Windows TTS voice: {ex.Message}");
             }
         }
 
@@ -4424,7 +3129,6 @@ namespace AlpWareStudio.Localay
                         }
                     }
 
-
                     if (!exists)
                     {
                         profileComboBox.Items.Add(profileName);
@@ -4647,70 +3351,6 @@ namespace AlpWareStudio.Localay
                     MessageBoxButton.OK,
                     MessageBoxImage.Error
                 );
-            }
-        }
-
-        private void LoadAllAudioProcessingModel()
-        {
-            audioProcessingModelComboBox.Items.Clear();
-
-            HashSet<string> uniqueNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            bool isFunAsr = string.Equals(ConfigManager.Instance.GetAudioProcessingProvider(), "FunASR", StringComparison.OrdinalIgnoreCase);
-
-            if (isFunAsr)
-            {
-                // FunASR: model files can sit directly in AudioModel/FunASR (root) or in a subfolder
-                string root = ConfigManager.Instance._funAsrModelFolderPath;
-                if (Directory.Exists(root))
-                {
-                    bool RootHasModel(string dir) =>
-                        File.Exists(Path.Combine(dir, "tokens.txt")) &&
-                        (File.Exists(Path.Combine(dir, "model.int8.onnx")) ||
-                         File.Exists(Path.Combine(dir, "model.onnx")));
-
-                    // Case 1: files placed directly in the FunASR root
-                    if (RootHasModel(root))
-                    {
-                        audioProcessingModelComboBox.Items.Add(new ComboBoxItem { Content = "(FunASR root)" });
-                    }
-
-                    // Case 2: model subfolders (e.g. extracted release folder)
-                    List<string> dirNames = Directory.GetDirectories(root)
-                        .Where(dir => RootHasModel(dir))
-                        .Select(dir => Path.GetFileName(dir))
-                        .Where(name => !string.IsNullOrEmpty(name))
-                        .OrderBy(name => name)
-                        .ToList()!;
-
-                    foreach (string name in dirNames)
-                    {
-                        if (uniqueNames.Add(name))
-                        {
-                            audioProcessingModelComboBox.Items.Add(new ComboBoxItem { Content = name });
-                        }
-                    }
-                }
-            }
-            else
-            {
-                // Whisper: *.bin files directly under AudioModel.
-                // The extra EndsWith filter is not redundant: a 3-character extension in a search
-                // pattern also matches longer extensions via 8.3 name aliasing, so "*.bin" alone
-                // would list unrelated files such as "notes.binary" as selectable models.
-                List<string?> fileNames = Directory.GetFiles(ConfigManager.Instance._audioProcessingModelFolderPath, "*.bin")
-                    .Where(path => path.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
-                    .Select(Path.GetFileNameWithoutExtension)
-                    .Where(name => !string.IsNullOrEmpty(name))
-                    .OrderBy(name => name)
-                    .ToList();
-
-                foreach (string? name in fileNames)
-                {
-                    if (!string.IsNullOrEmpty(name) && uniqueNames.Add(name))
-                    {
-                        audioProcessingModelComboBox.Items.Add(new ComboBoxItem { Content = name });
-                    }
-                }
             }
         }
 
@@ -5169,56 +3809,6 @@ namespace AlpWareStudio.Localay
             Console.WriteLine($"Show icon signal set to {enabled}");
         }
 
-        private void AudioProcessingProviderComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-
-            try
-            {
-                // If the audio service is running, confirm before switching provider
-                if (localWhisperService.Instance.IsRunning)
-                {
-                    MessageBoxResult result = MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_WhisperServiceRunning"],
-                        LocalizationManager.Instance.Strings["Title_Confirm"],
-                        MessageBoxButton.OKCancel,
-                        MessageBoxImage.Warning
-                    );
-                    if (result == MessageBoxResult.Cancel)
-                    {
-                        if (e.RemovedItems.Count > 0)
-                        {
-                            _isInitializing = true;
-                            audioProcessingProviderComboBox.SelectedItem = e.RemovedItems[0];
-                            _isInitializing = false;
-                        }
-                        return;
-                    }
-                    else
-                    {
-                        localWhisperService.Instance.Stop();
-                        audioServiceAutoTranslateCheckBox.IsChecked = false;
-                    }
-                }
-
-                if (audioProcessingProviderComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string provider = selectedItem.Content?.ToString() ?? "Whisper";
-                    ConfigManager.Instance.SetAudioProcessingProvider(provider);
-                    Console.WriteLine($"Audio processing provider set to: {provider}");
-                }
-
-                // Refresh provider-dependent UI: model list, whisper runtime row, download hint
-                LoadAllAudioProcessingModel();
-                UpdateProviderDependentVisibility();
-                UpdateAudioModelDownloadText(audioModelDownloadTextBlock);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating audio processing provider: {ex.Message}");
-            }
-        }
-
         // private void OpenAiRealtimeApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         // {
         //     if (_isInitializing) return;
@@ -5226,41 +3816,6 @@ namespace AlpWareStudio.Localay
         // }
 
         //Handle Auto-translate checkbox change for audio service
-        private async void AudioServiceAutoTranslateCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            bool enabled = audioServiceAutoTranslateCheckBox.IsChecked ?? false;
-            // ConfigManager.Instance.SetAudioServiceAutoTranslateEnabled(enabled);
-            Console.WriteLine($"Settings window: Audio service auto-translate set to {enabled}");
-            if (enabled && !localWhisperService.Instance.IsRunning)
-            {
-                // Start the local Whisper service if not already running
-                try
-                {
-                    await localWhisperService.Instance.StartServiceAsync((original, translated) =>
-                    {
-                        Console.WriteLine($"Whisper detected: {original}");
-                    });
-                    Console.WriteLine("Local Whisper Service started");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error starting Whisper service: {ex.Message}");
-                    audioServiceAutoTranslateCheckBox.IsChecked = false;
-                    MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_ErrorStartingAudioService"], ex.Message),
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-                }
-            }
-            else if (!enabled)
-            {
-                // Stop unconditionally: a start may still be loading its model (IsRunning is
-                // false until capture begins) and must be cancelled.
-                localWhisperService.Instance.Stop();
-                Console.WriteLine("Local Whisper Service stopped");
-            }
-        }
 
         // Handle Multi selection area checkbox change for multi selection area
         private void MultiSelectionAreaCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
@@ -5298,72 +3853,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void AudioModelDownloadTextBlock_Loaded(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (sender is TextBlock textBlock)
-                {
-                    UpdateAudioModelDownloadText(textBlock);
-                    
-                    LocalizationManager.Instance.PropertyChanged += (s, args) =>
-                    {
-                        if (args.PropertyName == "Strings")
-                        {
-                            UpdateAudioModelDownloadText(textBlock);
-                        }
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading audio model download text: {ex.Message}");
-            }
-        }
-
-        private void UpdateAudioModelDownloadText(TextBlock textBlock)
-        {
-            try
-            {
-                textBlock.Inlines.Clear();
-
-                bool isFunAsr = string.Equals(ConfigManager.Instance.GetAudioProcessingProvider(), "FunASR", StringComparison.OrdinalIgnoreCase);
-
-                if (isFunAsr)
-                {
-                    textBlock.Inlines.Add(new Run(LocalizationManager.Instance.Strings["Tip_FunAsrModelDownload_Part1"]));
-
-                    var funAsrHyperlink = new Hyperlink(new Run("https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"))
-                    {
-                        NavigateUri = new Uri("https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models"),
-                        Foreground = System.Windows.Media.Brushes.Blue
-                    };
-                    funAsrHyperlink.RequestNavigate += Hyperlink_RequestNavigate;
-                    textBlock.Inlines.Add(funAsrHyperlink);
-
-                    textBlock.Inlines.Add(new Run(LocalizationManager.Instance.Strings["Tip_FunAsrModelDownload_Part2"]));
-                    return;
-                }
-
-                textBlock.Inlines.Add(new Run(LocalizationManager.Instance.Strings["Tip_AudioModelDownload_Part1"]));
-                
-                // Hyperlink
-                var hyperlink = new Hyperlink(new Run("https://huggingface.co/ggerganov/whisper.cpp/tree/main"))
-                {
-                    NavigateUri = new Uri("https://huggingface.co/ggerganov/whisper.cpp/tree/main"),
-                    Foreground = System.Windows.Media.Brushes.Blue
-                };
-                hyperlink.RequestNavigate += Hyperlink_RequestNavigate;
-                textBlock.Inlines.Add(hyperlink);
-                
-                textBlock.Inlines.Add(new Run(LocalizationManager.Instance.Strings["Tip_AudioModelDownload_Part2"]));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating audio model download text: {ex.Message}");
-            }
-        }
-
         private void AutoOCRCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
             bool enabled = AutoOCRCheckBox.IsChecked ?? true;
@@ -5380,13 +3869,6 @@ namespace AlpWareStudio.Localay
                 );
             }
             isNeedShowWarningAutoOCR = enabled;
-        }
-
-        private void ExcludeCharacterNameCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            bool enabled = excludeCharacterNameCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetExcludeCharacterName(enabled);
-            Console.WriteLine($"Exclude character name set to {enabled}");
         }
 
         private void AutoSetOverlayBackgroundColorcheckBox_CheckedChanged(object sender, RoutedEventArgs e)
@@ -5435,29 +3917,6 @@ namespace AlpWareStudio.Localay
             Console.WriteLine($"HDR support set to {enabled}");
         }
 
-        private void SilenceThresholdTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string silenceThreshold = silenceThresholdTextBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(silenceThreshold))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetSilenceThreshold(silenceThreshold);
-                    Console.WriteLine($"Silence threshold set to: {silenceThreshold}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating silence threshold: {ex.Message}");
-            }
-        }
-
         // Select the item whose Tag matches (case-insensitive); falls back to the first item
         private static void SelectComboBoxItemByTag(ComboBox comboBox, string tag)
         {
@@ -5475,56 +3934,6 @@ namespace AlpWareStudio.Localay
         private static string? SelectedTag(ComboBox comboBox) =>
             (comboBox.SelectedItem as ComboBoxItem)?.Tag?.ToString();
 
-        private void AudioCaptureModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            string? mode = SelectedTag(audioCaptureModeComboBox);
-            if (mode == null) return;
-            ConfigManager.Instance.SetAudioCaptureMode(mode);
-            Console.WriteLine($"Audio capture mode set to: {mode} (applies the next time audio translation starts)");
-        }
-
-        private void VadModeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isInitializing) return;
-            string? mode = SelectedTag(vadModeComboBox);
-            if (mode == null) return;
-            ConfigManager.Instance.SetAudioVadMode(mode);
-            Console.WriteLine($"Speech detection set to: {mode} (applies the next time audio translation starts)");
-        }
-
-        private void SileroThresholdTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            if (float.TryParse(sileroThresholdTextBox.Text?.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float threshold))
-            {
-                ConfigManager.Instance.SetSileroVadThreshold(threshold);
-            }
-            // Show the stored (clamped) value, or restore it after invalid input
-            sileroThresholdTextBox.Text = ConfigManager.Instance.GetSileroVadThreshold().ToString("0.##", CultureInfo.InvariantCulture);
-        }
-
-        private void WhisperReducedContextCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            ConfigManager.Instance.SetWhisperReducedAudioContext(whisperReducedContextCheckBox.IsChecked ?? true);
-        }
-
-        private void WindowsTtsRateSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            int rate = (int)Math.Round(e.NewValue);
-            if (windowsTtsRateValueText != null)
-                windowsTtsRateValueText.Text = rate.ToString(CultureInfo.InvariantCulture);
-            if (_isInitializing) return;
-            WindowsTTSService.SetSpeechRate(rate);
-        }
-
-        private void TtsAutoSpeedUpCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            ConfigManager.Instance.SetTtsAutoSpeedUpEnabled(ttsAutoSpeedUpCheckBox.IsChecked ?? true);
-        }
-
         private void GoogleFreeFallbackComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_isInitializing) return;
@@ -5532,110 +3941,6 @@ namespace AlpWareStudio.Localay
             if (service == null) return;
             ConfigManager.Instance.SetGoogleFreeFallbackService(service);
             Console.WriteLine($"Google Translate (free) fallback set to: {service}");
-        }
-
-        private void SilenceDurationTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string silenceDuration = silenceDurationTextBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(silenceDuration))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetSilenceDurationMs(silenceDuration);
-                    Console.WriteLine($"Silence duration set to: {silenceDuration}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating silence duration: {ex.Message}");
-            }
-        }
-
-        private void MaxBufferSamplesTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string maxBufferSamples = maxBufferSamplesTextBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(maxBufferSamples))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetMaxBufferSamples(maxBufferSamples);
-                    Console.WriteLine($"Max buffer samples set to: {maxBufferSamples}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating max buffer samples: {ex.Message}");
-            }
-        }
-
-        private void WhisperThreadCountTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string threadCount = whisperThreadCountTextBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(threadCount))
-                {
-                    // Validate: must be 0 or positive integer
-                    if (int.TryParse(threadCount, out int count) && count >= 0)
-                    {
-                        int oldValue = ConfigManager.Instance.GetWhisperThreadCount();
-                        if (oldValue != count)
-                        {
-                            // Check if service is running
-                            if (localWhisperService.Instance.IsRunning)
-                            {
-                                MessageBoxResult result = MessageBox.Show(
-                                    LocalizationManager.Instance.Strings["Msg_WhisperServiceRunning"],
-                                    LocalizationManager.Instance.Strings["Title_Confirm"],
-                                    MessageBoxButton.OKCancel,
-                                    MessageBoxImage.Warning
-                                );
-                                if (result == MessageBoxResult.Cancel)
-                                {
-                                    // Revert to old value
-                                    whisperThreadCountTextBox.Text = oldValue.ToString();
-                                    return;
-                                }
-                                else
-                                {
-                                    localWhisperService.Instance.Stop();
-                                    audioServiceAutoTranslateCheckBox.IsChecked = false;
-                                }
-                            }
-
-                            ConfigManager.Instance.SetWhisperThreadCount(threadCount);
-                            Console.WriteLine($"Whisper thread count set to: {threadCount}");
-                        }
-                    }
-                    else
-                    {
-                        // Reset to default if invalid
-                        whisperThreadCountTextBox.Text = "0";
-                        ConfigManager.Instance.SetWhisperThreadCount("0");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating whisper thread count: {ex.Message}");
-            }
         }
 
         #region Clipboard Auto-Translate Event Handlers
@@ -5685,7 +3990,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 string debounceText = clipboardDebounceTextBox.Text?.Trim() ?? "";
-                
+
                 if (int.TryParse(debounceText, out int debounceMs))
                 {
                     ConfigManager.Instance.SetClipboardDebounceMs(debounceMs);
@@ -5714,7 +4019,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 string maxCharsText = clipboardMaxCharsTextBox.Text?.Trim() ?? "";
-                
+
                 if (int.TryParse(maxCharsText, out int maxChars))
                 {
                     ConfigManager.Instance.SetClipboardMaxChars(maxChars);

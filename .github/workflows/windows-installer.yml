@@ -1,6 +1,9 @@
 name: Build Windows Release
 
 on:
+  pull_request:
+  push:
+    branches: [main, "codex/**"]
   workflow_dispatch:
 
 permissions:
@@ -56,7 +59,8 @@ jobs:
             -c $env:CONFIGURATION `
             -r $env:RUNTIME `
             --self-contained true `
-            --no-restore
+            --no-restore `
+            -bl:artifacts/build.binlog
           if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
 
       - name: Publish self-contained Windows build
@@ -84,6 +88,13 @@ jobs:
           $exeInfo = Get-Item -LiteralPath $exe
           if ($exeInfo.Length -le 0) { throw "Localay.exe is empty." }
           Write-Host "Built $($exeInfo.FullName) ($($exeInfo.Length) bytes)"
+
+      - name: Verify portable runtime and dependencies
+        shell: pwsh
+        run: |
+          ./Verify-Publish.ps1 -PublishDirectory (Join-Path $env:GITHUB_WORKSPACE "artifacts\publish")
+          dotnet list $env:PROJECT package --include-transitive
+          if ($LASTEXITCODE -ne 0) { throw "Dependency audit failed." }
 
       - name: Add distribution documents
         shell: pwsh
@@ -138,3 +149,11 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
+
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Localay-build-diagnostics
+          path: artifacts/*.binlog
+          if-no-files-found: ignore

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -168,7 +168,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 string key = "kj)TGtrK>f]b[Piow.gU+nC@s\"\"\"\"\"\"4";
-                string modelPath = "oneocr.onemodel";
+                string modelPath = Path.Combine(AppContext.BaseDirectory, "oneocr.onemodel");
 
                 long res = NativeMethods.CreateOcrPipeline(modelPath, key, Context, out _pipeline);
                 if (res != 0)

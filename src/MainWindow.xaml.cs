@@ -1,4 +1,4 @@
-﻿using System.Windows;
+using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -16,7 +16,6 @@ using System.Windows.Shell;
 using System.Net.Http;
 using System.Text.Json;
 using RST;
-
 
 namespace AlpWareStudio.Localay
 {
@@ -57,7 +56,6 @@ namespace AlpWareStudio.Localay
         private const uint MF_BYCOMMAND = 0x00000000;
         private const uint MF_GRAYED = 0x00000001;
         private static readonly HttpClient _httpClient = new HttpClient() { Timeout = TimeSpan.FromSeconds(5) };
-
 
         [StructLayout(LayoutKind.Sequential)]
         private struct RECT
@@ -121,7 +119,6 @@ namespace AlpWareStudio.Localay
         // Force update prompt
         private int isForceUpdatePrompt = 8; //increase to force update prompt
 
-
         // Store previous capture position to calculate offset
         private int previousCaptureX;
         private int previousCaptureY;
@@ -160,7 +157,6 @@ namespace AlpWareStudio.Localay
             _translationHistory.Clear();
             Console.WriteLine("Translation history cleared from MainWindow");
         }
-
 
         //allow this to be accesible through an "Instance" variable
         public static MainWindow Instance { get { return _this!; } }
@@ -239,7 +235,6 @@ namespace AlpWareStudio.Localay
         // Methods for syncing UI controls with MonitorWindow
         // Flag to prevent saving during initialization
         private static bool _isInitializing = true;
-
 
         public void SetOcrMethod(string method)
         {
@@ -454,19 +449,6 @@ namespace AlpWareStudio.Localay
             KeyboardShortcuts.SelectArea4Requested += (s, e) => SwitchToTranslationArea(3);
             KeyboardShortcuts.SelectArea5Requested += (s, e) => SwitchToTranslationArea(4);
 
-            // Audio service hotkey
-            KeyboardShortcuts.AudioServiceToggleRequested += async (s, e) =>
-            {
-                try
-                {
-                    await ToggleAudioServiceAsync();
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error toggling audio service via hotkey: {ex.Message}");
-                }
-            };
-
             // Swap languages hotkey
             KeyboardShortcuts.SwapLanguagesRequested += (s, e) =>
             {
@@ -513,21 +495,7 @@ namespace AlpWareStudio.Localay
             // Load exclude regions from config
             LoadExcludeRegions();
 
-            // Update audio button label when localization strings change
-            LocalizationManager.Instance.PropertyChanged += (s, args) =>
-            {
-                try
-                {
-                    if (args.PropertyName == "Strings")
-                    {
-                        UpdateAudioServiceButtonUI(ConfigManager.Instance.IsAudioServiceAutoTranslateEnabled());
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error updating localized audio button: {ex.Message}");
-                }
-            };
+
         }
 
         // Load exclude regions from config
@@ -817,99 +785,6 @@ namespace AlpWareStudio.Localay
             selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
         }
 
-        // Toggle Audio Service (Start/Stop local Whisper) from main window button
-        private async void AudioServiceButton_Click(object sender, RoutedEventArgs e)
-        {
-            await ToggleAudioServiceAsync();
-        }
-
-        // Shared toggle method so UI button and hotkey can call same logic
-        public async System.Threading.Tasks.Task ToggleAudioServiceAsync()
-        {
-            try
-            {
-                bool enabled = !ConfigManager.Instance.IsAudioServiceAutoTranslateEnabled();
-                ConfigManager.Instance.SetAudioServiceAutoTranslateEnabled(enabled);
-                Console.WriteLine($"MainWindow: Audio service auto-translate set to {enabled}");
-
-                UpdateAudioServiceButtonUI(enabled);
-
-                if (enabled && !localWhisperService.Instance.IsRunning)
-                {
-                    try
-                    {
-                        await localWhisperService.Instance.StartServiceAsync((original, translated) =>
-                        {
-                            Console.WriteLine($"Whisper detected: {original}");
-                        });
-                        // Not running without an exception means the user turned it off while
-                        // the model was loading — the off branch already updated the UI.
-                        if (localWhisperService.Instance.IsRunning)
-                        {
-                            Console.WriteLine("Local Whisper Service started");
-                            AudioStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(20, 180, 20)); // Green
-                            AudioStatusText.Text = LocalizationManager.Instance.Strings["Btn_On"];
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error starting Whisper service: {ex.Message}");
-                        ConfigManager.Instance.SetAudioServiceAutoTranslateEnabled(false);
-                        UpdateAudioServiceButtonUI(false);
-                        AudioStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
-                        AudioStatusText.Text = LocalizationManager.Instance.Strings["Btn_Off"];
-                        System.Windows.MessageBox.Show(
-                            string.Format(LocalizationManager.Instance.Strings["Msg_ErrorStartingAudioService"], ex.Message),
-                            LocalizationManager.Instance.Strings["Title_Error"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Error);
-                    }
-                }
-                else if (!enabled)
-                {
-                    // Stop unconditionally: the service may still be loading its model, in which
-                    // case IsRunning is false but the pending start must be cancelled.
-                    localWhisperService.Instance.Stop();
-                    Console.WriteLine("Local Whisper Service stopped");
-                    AudioStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
-                    AudioStatusText.Text = LocalizationManager.Instance.Strings["Btn_Off"];
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error toggling audio service: {ex.Message}");
-            }
-        }
-
-        private void UpdateAudioServiceButtonUI(bool enabled)
-        {
-            try
-            {
-                if (audioServiceButton == null) return;
-                Dispatcher.Invoke(() =>
-                {
-                    try
-                    {
-                        var baseLabel = LocalizationManager.Instance.Strings["Btn_AudioService"];
-                        var stateLabelKey = enabled ? "Btn_AudioService_On" : "Btn_AudioService_Off";
-                        var stateLabel = LocalizationManager.Instance.Strings[stateLabelKey];
-                        audioServiceButton.Content = $"{baseLabel}: {stateLabel}";
-                    }
-                    catch
-                    {
-                        // Fallback to simple english text if localization keys are missing
-                        audioServiceButton.Content = enabled ? "Audio STT: On" : "Audio STT: Off";
-                    }
-
-                    audioServiceButton.Background = enabled ? new SolidColorBrush(Color.FromRgb(20, 180, 20)) : new SolidColorBrush(Color.FromRgb(95, 95, 95));
-                });
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating audio button UI: {ex.Message}");
-            }
-        }
-
         // Handle the event when translation region is selected
         private void TranslationAreaSelector_SelectionComplete(object? sender, TranslationAreaInfo areaInfo)
         {
@@ -1147,7 +1022,7 @@ namespace AlpWareStudio.Localay
             {
             // Play entrance animations
             PlayEntranceAnimations();
-            
+
             // Update capture rectangle
             UpdateCaptureRect();
             SettingsWindow.Instance.ListHotKey_TextChanged();
@@ -1201,9 +1076,6 @@ namespace AlpWareStudio.Localay
                     break;
                 }
             }
-            bool audioEnabled = false;
-            ConfigManager.Instance.SetAudioServiceAutoTranslateEnabled(audioEnabled);
-            UpdateAudioServiceButtonUI(audioEnabled);
             UpdateThemeToggleButtonUI();
 
             // Initialization is complete, now we can save settings changes
@@ -1245,54 +1117,12 @@ namespace AlpWareStudio.Localay
 
             // Load screen selection list
             LoadScreenList();
-
-            // Warm up Supertonic TTS in the background so the first SpeakText
-            // call returns instantly. Only kicks in when the user has actually
-            // selected Supertonic as the TTS service and the model is on disk.
-            // Wrapped in an isolated method to ensure that any failure here
-            // (e.g. assembly load issue in the release build) cannot prevent
-            // the rest of MainWindow_Loaded from running and the window from
-            // appearing.
-            try { TryWarmUpSupertonic(); }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Supertonic warm-up trigger failed: {ex.Message}");
-            }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error during MainWindow_Loaded: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
                 _isInitializing = false;
-            }
-        }
-
-        // Isolated so any failure (assembly load, ONNX init, etc.) cannot
-        // prevent MainWindow_Loaded from completing and the window from
-        // showing. All exceptions are swallowed and logged.
-        private void TryWarmUpSupertonic()
-        {
-            try
-            {
-                if (!ConfigManager.Instance.IsTtsEnabled()) return;
-                if (ConfigManager.Instance.GetTtsService() != "Supertonic") return;
-                if (!SupertonicTTSService.IsModelInstalled()) return;
-
-                var warmup = SupertonicTTSService.Instance.WarmUpAsync();
-                if (warmup != null)
-                {
-                    warmup.ContinueWith(t =>
-                    {
-                        if (t.IsFaulted && t.Exception != null)
-                        {
-                            Console.WriteLine($"Supertonic warm-up unobserved: {t.Exception.GetBaseException().Message}");
-                        }
-                    }, TaskScheduler.Default);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Supertonic warm-up outer error: {ex.Message}");
             }
         }
 
@@ -1355,12 +1185,12 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine("UpdateMonitorWindowPosition: MonitorWindow handle not available yet");
                 return;
             }
-            
+
             int physX = captureRect.Left;
             int physY = captureRect.Top;
             int physW = Math.Max(1, captureRect.Width);
             int physH = Math.Max(1, captureRect.Height);
-            
+
             DpiHelper.PositionWindowPhysical(hwnd, physX, physY, physW, physH);
 
             // Save physical position for future reference
@@ -1461,7 +1291,6 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Capture position changed by ({offsetX}, {offsetY}). Text overlays updated.");
             }
 
-
             UpdateMonitorWindowPosition();
         }
 
@@ -1504,17 +1333,6 @@ namespace AlpWareStudio.Localay
                 {
                     ChatBoxWindow.Instance.chatHistoryText.Document.Blocks.Clear();
                 }
-                if (ConfigManager.Instance.IsTtsEnabled())
-                {
-                    // Stop speech queue in ChatBoxWindow first
-                    ChatBoxWindow.StopSpeechQueue();
-
-                    // Stop all TTS services
-                    WindowsTTSService.StopAllTTS();
-                    GoogleTTSService.StopAllTTS();
-                    ElevenLabsService.StopAllTTS();
-                    SupertonicTTSService.StopAllTTS();
-                }
                 ShowFastNotification(LocalizationManager.Instance.Strings["NotificationTitle_TranslationStopped"], LocalizationManager.Instance.Strings["NotificationMessage_TranslationStopped_Details"]);
                 StartStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
                 StartStatusText.Text = LocalizationManager.Instance.Strings["Btn_Off"];
@@ -1550,10 +1368,8 @@ namespace AlpWareStudio.Localay
             }
         }
 
-
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {
-            localWhisperService.Instance.StopForExit();
             this.Close();
         }
 
@@ -1564,8 +1380,6 @@ namespace AlpWareStudio.Localay
             _graphicsCaptureService?.Dispose();
             _graphicsCaptureService = null;
 
-            // Stop local whisper service
-            localWhisperService.Instance.StopForExit();
 
             // Clean up Logic resources
             Logic.Instance.Finish();
@@ -1682,7 +1496,6 @@ namespace AlpWareStudio.Localay
             IntPtr handle = new System.Windows.Interop.WindowInteropHelper(this).Handle;
             KeyboardShortcuts.SetMainWindowHandle(handle);
 
-
             HwndSource source = HwndSource.FromHwnd(handle);
             source.AddHook(WndProc);
         }
@@ -1725,7 +1538,6 @@ namespace AlpWareStudio.Localay
             {
                 ShowWindow(consoleWindow, SW_HIDE);
             }
-            localWhisperService.Instance.StopForExit();
 
             // Make sure the application exits when the main window is closed
             System.Windows.Application.Current.Shutdown();
@@ -1811,7 +1623,6 @@ namespace AlpWareStudio.Localay
         [return: MarshalAs(UnmanagedType.Bool)]
         private static extern bool IsWindowVisible(IntPtr hWnd);
 
-
         private Rectangle _lastLoggedWindowRegion;
 
         private Bitmap CaptureWindow(IntPtr handle)
@@ -1840,14 +1651,13 @@ namespace AlpWareStudio.Localay
                 if (hasSelectedTranslationArea && currentAreaIndex >= 0 && currentAreaIndex < savedTranslationAreas.Count)
                 {
                     var selectedArea = savedTranslationAreas[currentAreaIndex];
-                    
+
                     // Areas are stored in physical screen pixels, the same space as the window rect,
                     // so no DPI adjustment is needed here (the DPI saved with the area is informational).
                     captureX = (int)selectedArea.X - rect.Left;
                     captureY = (int)selectedArea.Y - rect.Top;
                     captureWidth = (int)selectedArea.Width;
                     captureHeight = (int)selectedArea.Height;
-
 
                     if (captureX < 0) captureX = 0;
                     if (captureY < 0) captureY = 0;
@@ -1870,7 +1680,6 @@ namespace AlpWareStudio.Localay
 
                     Logic.Instance.SetCurrentCapturePosition(rect.Left, rect.Top);
                 }
-
 
                 // Try Windows Graphics Capture first (GPU-friendly, no flickering).
                 Bitmap? fullWindowBmp = null;
@@ -2017,7 +1826,6 @@ namespace AlpWareStudio.Localay
                             Logic.Instance.SetCurrentCapturePosition(windowRect.Left, windowRect.Top);
                         }
 
-
                         using (Bitmap bitmap = CaptureWindow(capturedWindowHandle))
                         {
                             // A 1x1 bitmap means no frame this tick (WGC not ready yet, or capture failed)
@@ -2049,7 +1857,6 @@ namespace AlpWareStudio.Localay
                     return;
                 }
             }
-
 
             //if capture rect is less than 1 pixel, don't capture
             if (captureRect.Width < 1 || captureRect.Height < 1) return;
@@ -2129,7 +1936,6 @@ namespace AlpWareStudio.Localay
         //         MonitorWindow.Instance.RefreshOverlays();
         //     }
         // }
-
 
         // Reset OCR hash when language selection changes
         private void SourceLanguageComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -2698,7 +2504,7 @@ namespace AlpWareStudio.Localay
                 double savedTop = ConfigManager.Instance.GetChatboxPositionTop();
                 double savedWidth = ConfigManager.Instance.GetChatboxPositionWidth();
                 double savedHeight = ConfigManager.Instance.GetChatboxPositionHeight();
-                
+
                 // If we have a saved position (not default 0,0), show or create chatbox at saved position
                 if (savedLeft > 0 || savedTop > 0)
                 {
@@ -2707,18 +2513,18 @@ namespace AlpWareStudio.Localay
                     {
                         // Create new ChatBox instance
                         chatBoxWindow = new ChatBoxWindow();
-                        
+
                         // Set position and size from saved values
                         chatBoxWindow.Left = savedLeft;
                         chatBoxWindow.Top = savedTop;
                         chatBoxWindow.Width = savedWidth;
                         chatBoxWindow.Height = savedHeight;
-                        
+
                         // Attach event handlers
                         chatBoxWindow.Closed += ChatBox_Closed_Handler;
                         chatBoxWindow.IsVisibleChanged += ChatBox_IsVisibleChanged_Handler;
                     }
-                    
+
                     // Show the chatbox
                     chatBoxWindow.Show();
                     isChatBoxVisible = true;
@@ -2737,7 +2543,7 @@ namespace AlpWareStudio.Localay
                 ShowChatBoxSelector();
             }
         }
-        
+
         // Helper method to show chatbox selector
         private void ShowChatBoxSelector()
         {
@@ -2970,8 +2776,7 @@ namespace AlpWareStudio.Localay
         }
 
         // Typewriter dialogue can be translated while it is still typing out, then again once complete.
-        // The complete line replaces the half-typed entry instead of adding a second one, and TTS reads
-        // only what the half-typed translation did not already say.
+        // The complete line replaces the half-typed entry instead of adding a second one.
         private const int TypedOutEntryMaxAgeSeconds = 20;
         private const int TypedOutEntriesToCheck = 3;
 
@@ -2985,27 +2790,13 @@ namespace AlpWareStudio.Localay
             if (partial == null)
                 return false;
 
-            string previousTranslation = partial.TranslatedText;
             partial.OriginalText = originalText;
             partial.TranslatedText = translatedText;
             partial.Timestamp = DateTime.Now;
             Console.WriteLine("Typed-out line completed: replacing its half-typed history entry");
 
-            ChatBoxWindow.Instance!.OnTranslationWasAdded(originalText, translatedText, false,
-                textToSpeak: GetUnspokenRemainder(previousTranslation, translatedText));
+            ChatBoxWindow.Instance!.OnTranslationWasAdded(originalText, translatedText);
             return true;
-        }
-
-        // The part of the complete translation after the half-typed one, when it extends it; otherwise
-        // null (read the whole line), since the half-typed one may have been worded differently
-        private static string? GetUnspokenRemainder(string spoken, string complete)
-        {
-            char[] trim = { ' ', '.', ',', '…', '、', '。', '-', '—' };
-            string spokenCore = spoken.Trim().TrimEnd(trim);
-            string completeText = complete.TrimStart();
-            if (spokenCore.Length > 0 && completeText.StartsWith(spokenCore, StringComparison.OrdinalIgnoreCase))
-                return completeText.Substring(spokenCore.Length).TrimStart(trim);
-            return null;
         }
 
         // Handle translation events from Logic
@@ -3712,29 +3503,6 @@ namespace AlpWareStudio.Localay
         }
 
         // private bool isListening = false;
-        // private OpenAIRealtimeAudioServiceWhisper? openAIRealtimeAudioService = null;
-
-        // private void ListenButton_Click(object sender, RoutedEventArgs e)
-        // {
-        //     var btn = (System.Windows.Controls.Button)sender;
-        //     if (isListening)
-        //     {
-        //         isListening = false;
-        //         btn.Content = "Listen";
-        //         btn.Background = new SolidColorBrush(Color.FromRgb(69, 119, 176)); // Blue
-        //         openAIRealtimeAudioService?.Stop();
-        //     }
-        //     else
-        //     {
-        //         isListening = true;
-        //         btn.Content = "Stop Listening";
-        //         btn.Background = new SolidColorBrush(Color.FromRgb(220, 0, 0)); // Red
-        //         if (openAIRealtimeAudioService == null)
-        //             openAIRealtimeAudioService = new OpenAIRealtimeAudioServiceWhisper();
-        //         openAIRealtimeAudioService.StartRealtimeAudioService(OnOpenAITranscriptionReceived);
-        //     }
-        // }
-
         private void LanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (languageSelector.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag is string languageCode)
@@ -3860,7 +3628,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 Console.WriteLine($"[ClipboardTranslate] Calling TranslateTextImmediateAsync...");
-                
+
                 // Perform translation
                 string? translatedText = await Logic.Instance.TranslateTextImmediateAsync(text);
 
@@ -3919,7 +3687,7 @@ namespace AlpWareStudio.Localay
             {
                 monitor.DebounceMs = ConfigManager.Instance.GetClipboardDebounceMs();
                 monitor.MaxCharacters = ConfigManager.Instance.GetClipboardMaxChars();
-                
+
                 if (!monitor.IsListening)
                 {
                     monitor.StartListening(this);

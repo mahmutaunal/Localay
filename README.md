@@ -31,8 +31,10 @@ dotnet build .\Localay.csproj -c Release
 ### Publish
 
 ```powershell
-dotnet publish .\Localay.csproj -c Release -r win-x64 --self-contained true
+./Publish-Windows.ps1
 ```
+
+The verified portable output is written to `artifacts/publish`; Release build output is isolated in `bin/Release`. Language files and OneOCR assets are copied into both outputs.
 
 The project intentionally keeps the proven RSTGameTranslation WPF/Direct3D capture and overlay architecture instead of rewriting the UI. Localay defaults to English source text and Turkish output.
 
@@ -44,7 +46,7 @@ Localay does not claim that every game or every stylized font can be localized p
 
 ## Performance notes
 
-Localay inherits and preserves the performance-oriented parts of the upstream engine, including Windows Graphics Capture/Direct3D 11 capture, frame-change detection, translation caching, OCR timing controls, spatial block detection and stale-result protections. Avoid enabling speech/TTS features if your goal is the lightest possible game-text workflow.
+Localay inherits and preserves the performance-oriented parts of the upstream engine, including Windows Graphics Capture/Direct3D 11 capture, frame-change detection, translation caching, OCR timing controls, spatial block detection and stale-result protections. The speech recognition and TTS stack is removed from Localay: Whisper, CUDA/Vulkan speech runtimes, Sherpa, NAudio, System.Speech and the speech-only ONNX runtime are not shipped. The OCR, translation, capture and overlay UI is retained; retired speech controls are removed.
 
 ## Privacy
 

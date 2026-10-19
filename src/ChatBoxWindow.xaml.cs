@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -87,22 +87,6 @@ namespace AlpWareStudio.Localay
 
         // Flag used to allow a forced close (different from normal hide-on-close behavior)
         private bool _forceClose = false;
-
-        // Semaphore to ensure only one speech request is processed at a time
-        private static readonly SemaphoreSlim _speechSemaphore = new SemaphoreSlim(1, 1);
-
-        // Thread-safe queue for speech requests
-        private static readonly ConcurrentQueue<string> _speechQueue = new ConcurrentQueue<string>();
-
-        // Flag to track if we're currently processing speech
-        private static bool _isProcessingSpeech = false;
-
-        // Lock to make EnqueueSpeechRequest's check-and-start atomic, preventing
-        // two concurrent enqueues from both starting a ProcessSpeechQueueAsync task.
-        private static readonly object _speechStartLock = new object();
-
-        // Cancellation token source for speech processing
-        private static CancellationTokenSource? _speechCancellationTokenSource;
 
         // Click-through overlay for toggle button
         private IntPtr _clickThroughOverlayHandle = IntPtr.Zero;
@@ -205,11 +189,6 @@ namespace AlpWareStudio.Localay
             learnItem.Click += LearnMenuItem_Click;
             contextMenu.Items.Add(learnItem);
 
-            // Add Speak menu item
-            MenuItem speakItem = new MenuItem() { Header = "Speak" };
-            speakItem.Click += SpeakMenuItem_Click;
-            contextMenu.Items.Add(speakItem);
-
             // Assign the context menu to the RichTextBox
             chatHistoryText.ContextMenu = contextMenu;
         }
@@ -250,274 +229,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void SpeakMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Get the selected text
-                TextRange selectedText = new TextRange(
-                    chatHistoryText.Selection.Start,
-                    chatHistoryText.Selection.End);
-
-                if (!string.IsNullOrWhiteSpace(selectedText.Text))
-                {
-                    string text = selectedText.Text.Trim();
-                    EnqueueSpeechRequest(text);
-                }
-                else
-                {
-                    Console.WriteLine("No text selected for Speak function");
-                    System.Windows.MessageBox.Show("Please select some text to speak first.",
-                        "No Text Selected", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in Speak function: {ex.Message}");
-                System.Windows.MessageBox.Show($"Error: {ex.Message}", "Text-to-Speech Error",
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        // Process the speech queue
-        // _isProcessingSpeech is set by EnqueueSpeechRequest (under _speechStartLock) before this
-        // task starts, and cleared here under the same lock only once the queue is seen empty.
-        // Setting it inside the task, and clearing it outside the lock, let a line enqueued at
-        // the wrong moment either wait for the next line or start a second processor.
-        private static async Task ProcessSpeechQueueAsync(CancellationTokenSource cts)
-        {
-            var cancellationToken = cts.Token;
-            Console.WriteLine("Starting speech queue processing");
-            
-            try
-            {
-                
-                await Task.Delay(5, cancellationToken);
-                
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    lock (_speechStartLock)
-                    {
-                        if (_speechQueue.IsEmpty)
-                        {
-                            if (ReferenceEquals(_speechCancellationTokenSource, cts)) _isProcessingSpeech = false;
-                            return;
-                        }
-                    }
-
-                    StringBuilder combinedText = new StringBuilder();
-                    int queueSize = _speechQueue.Count;
-                    Console.WriteLine($"Processing {queueSize} speech requests as one batch");
-                    
-                    // Dequeue all items and combine them
-                    string? lastAppended = null;
-                    while (_speechQueue.TryDequeue(out string? textToSpeak) && !cancellationToken.IsCancellationRequested)
-                    {
-                        if (!string.IsNullOrWhiteSpace(textToSpeak))
-                        {
-                            // Deduplicate: skip if identical to the last item we appended.
-                            // This prevents the same translation (enqueued twice by a bug or
-                            // race) from being spoken twice in a row.
-                            if (lastAppended != null &&
-                                string.Equals(lastAppended, textToSpeak, StringComparison.Ordinal))
-                            {
-                                Console.WriteLine($"Skipping duplicate speech item: {textToSpeak.Substring(0, Math.Min(50, textToSpeak.Length))}...");
-                                continue;
-                            }
-
-                            // Add a space between items if needed
-                            if (combinedText.Length > 0)
-                            {
-                                combinedText.Append(" ");
-                            }
-
-                            combinedText.Append(textToSpeak);
-                            lastAppended = textToSpeak;
-                        }
-                    }
-                    
-                    // If we have text to speak, process it as one request
-                    if (combinedText.Length > 0 && !cancellationToken.IsCancellationRequested)
-                    {
-                        string finalText = combinedText.ToString();
-                        Console.WriteLine($"Speaking combined text ({finalText.Length} chars): {finalText.Substring(0, Math.Min(50, finalText.Length))}...");
-                        
-                        // Process the combined speech request
-                        await Speak_Item_InternalAsync(finalText, cancellationToken);
-                    }
-                    
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                Console.WriteLine("Speech processing was cancelled");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in speech queue processing: {ex.Message}");
-            }
-            finally
-            {
-                // Only the current processor may clear the flag: after StopSpeechQueue a newer
-                // processor may already be running.
-                lock (_speechStartLock)
-                {
-                    if (ReferenceEquals(_speechCancellationTokenSource, cts)) _isProcessingSpeech = false;
-                }
-                Console.WriteLine("Speech queue processing completed");
-            }
-        }
-
-        // Enqueue a speech request and start processing if needed
-        public static void EnqueueSpeechRequest(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return;
-
-            try
-            {
-                // Process the text to remove line breaks and normalize spaces
-                string processedText = ProcessTextForSpeech(text);
-
-                // Add the processed text to the queue
-                _speechQueue.Enqueue(processedText);
-                AudioTiming.Log("6. TTS queued", AudioTiming.Preview(processedText));
-                Console.WriteLine($"Speech request enqueued. Queue size: {_speechQueue.Count}");
-
-                // Atomically check whether a processor task needs to be started.
-                // Without this lock, two concurrent enqueues could both observe
-                // _isProcessingSpeech == false and both start a processing task,
-                // which (combined with the non-atomic flag) could lead to the
-                // same text being spoken twice.
-                lock (_speechStartLock)
-                {
-                    if (!_isProcessingSpeech)
-                    {
-                        // No processor is running, so the previous token source (if any) is
-                        // no longer in use.
-                        _speechCancellationTokenSource?.Dispose();
-                        var cts = new CancellationTokenSource();
-                        _speechCancellationTokenSource = cts;
-                        _isProcessingSpeech = true;
-
-                        // Start the processing task
-                        Task.Run(() => ProcessSpeechQueueAsync(cts));
-                    }
-                    else
-                    {
-                        // Already processing — the queued item will be picked up by the
-                        // running processor's loop. No need to start a new task.
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error enqueueing speech request: {ex.Message}");
-            }
-        }
-
-        // Process text to optimize for speech with minimal pauses
-        private static string ProcessTextForSpeech(string text)
-        {
-            if (string.IsNullOrWhiteSpace(text))
-                return string.Empty;
-            
-            // Replace multiple newlines with a single space to reduce pauses
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\n+", ".");
-            
-            // Replace multiple spaces with a single space
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-            
-            // text = System.Text.RegularExpressions.Regex.Replace(text, @"\.{2,}", ".");
-            // text = System.Text.RegularExpressions.Regex.Replace(text, @"\s*([.,;:!?])\s*", "$1 ");
-            
-            return text.Trim();
-        }
-
-        private static async Task<bool> Speak_Item_InternalAsync(string text, CancellationToken cancellationToken)
-        {
-            if (string.IsNullOrWhiteSpace(text) || cancellationToken.IsCancellationRequested)
-                return false;
-
-            try
-            {
-                string trimmedText = text.Trim();
-                Console.WriteLine($"Speaking text: {trimmedText.Substring(0, Math.Min(50, trimmedText.Length))}...");
-
-                // Check if TTS is enabled in config
-                if (ConfigManager.Instance.IsTtsEnabled())
-                {
-                    string ttsService = ConfigManager.Instance.GetTtsService();
-                    
-                    // Wait to acquire the semaphore - this ensures only one speech request runs at a time
-                    await _speechSemaphore.WaitAsync(cancellationToken);
-                    
-                    try
-                    {
-                        bool success = false;
-                        AudioTiming.Log("7. TTS synthesis start", $"{ttsService}, {trimmedText.Length} chars");
-                        var ttsTimer = System.Diagnostics.Stopwatch.StartNew();
-
-                        if (ttsService == "ElevenLabs")
-                        {
-                            success = await ElevenLabsService.Instance.SpeakText(trimmedText);
-                        }
-                        else if (ttsService == "Google Cloud TTS")
-                        {
-                            success = await GoogleTTSService.Instance.SpeakText(trimmedText);
-                        }
-                        else if (ttsService == "Windows TTS")
-                        {
-                            success = await WindowsTTSService.Instance.SpeakText(trimmedText);
-                        }
-                        else if (ttsService == "Supertonic")
-                        {
-                            success = await SupertonicTTSService.Instance.SpeakText(trimmedText);
-                        }
-                        else
-                        {
-                            Console.WriteLine($"Unsupported TTS service: {ttsService}");
-                            return false;
-                        }
-
-                        AudioTiming.Log("8. TTS synthesis done", $"{ttsTimer.ElapsedMilliseconds} ms (audio queued for playback)");
-                        if (!success)
-                        {
-                            Console.WriteLine($"Failed to generate speech using {ttsService}");
-                        }
-                        
-                        return success;
-                    }
-                    finally
-                    {
-                        // Always release the semaphore when done
-                        _speechSemaphore.Release();
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Text-to-Speech is disabled in settings");
-                    return true; // Consider this successful since TTS is disabled
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                Console.WriteLine("Speech operation was cancelled");
-                throw; // Re-throw to propagate cancellation
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in Speak function: {ex.Message}");
-                return false;
-            }
-        }
-
-        // For backward compatibility - now just enqueues the speech request
-        private void Speak_Item(string text)
-        {
-            EnqueueSpeechRequest(text);
-        }
-
         private void ChatBoxWindow_Closing(object? sender, System.ComponentModel.CancelEventArgs e)
         {
             if (_forceClose)
@@ -530,15 +241,6 @@ namespace AlpWareStudio.Localay
 
                 // Stop auto-clear timer
                 try { _autoClearTimer?.Stop(); } catch { }
-
-                // Cancel any pending speech processing
-                try
-                {
-                    _speechCancellationTokenSource?.Cancel();
-                    _speechCancellationTokenSource?.Dispose();
-                    _speechCancellationTokenSource = null;
-                }
-                catch { }
 
                 // Unsubscribe from Logic events
                 try { Logic.Instance.TranslationCompleted -= OnTranslationCompleted; } catch { }
@@ -963,7 +665,7 @@ namespace AlpWareStudio.Localay
         {
             // Reflow text when window size changes
             UpdateChatHistory();
-            
+
             // Save size if window is visible and loaded
             if (this.IsVisible && this.IsLoaded)
             {
@@ -1022,36 +724,6 @@ namespace AlpWareStudio.Localay
             if (e.ClickCount == 1)
             {
                 this.DragMove();
-            }
-        }
-
-        public static void StopSpeechQueue()
-        {
-            try
-            {
-                Console.WriteLine("Stopping speech queue processing");
-                
-                lock (_speechStartLock)
-                {
-                    // Cancel the current speech processing task. Not disposed here: the
-                    // processor may still observe the token; it is released by the next start.
-                    _speechCancellationTokenSource?.Cancel();
-                    _speechCancellationTokenSource = null;
-
-                    // Clear the speech queue
-                    while (_speechQueue.TryDequeue(out _))
-                    {
-                        // Just dequeue to clear
-                    }
-
-                    _isProcessingSpeech = false;
-                }
-                
-                Console.WriteLine("Speech queue cleared and processing stopped");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error stopping speech queue: {ex.Message}");
             }
         }
 
@@ -1122,7 +794,6 @@ namespace AlpWareStudio.Localay
             }
         }
 
-
         // Create and apply a flash animation for the button
         private void CreateFlashAnimation(System.Windows.Controls.Button button)
         {
@@ -1185,9 +856,7 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        // textToSpeak: what TTS reads instead of the translation (only the new part of a completed
-        // typed-out line); empty reads nothing
-        public void OnTranslationWasAdded(string originalText, string translatedText, bool fromClipboard=false, string? textToSpeak=null)
+        public void OnTranslationWasAdded(string originalText, string translatedText, bool fromClipboard=false)
         {
             // Hide translation status indicator if it was visible
             HideTranslationStatus();
@@ -1197,58 +866,6 @@ namespace AlpWareStudio.Localay
 
             // Update UI with existing history
             UpdateChatHistory();
-            if (fromClipboard)
-            {
-                if (ConfigManager.Instance.IsExcludeCharacterNameEnabled())
-                {
-                    string[] text = translatedText.Split(':', 2);
-                    if (text.Length > 1)
-                    {
-                        EnqueueSpeechRequest(text[1]);
-                    }
-                    else
-                    {
-                        EnqueueSpeechRequest(text[0]);
-                    }
-                }
-                else
-                {
-                    EnqueueSpeechRequest(translatedText);
-                }
-            }
-            else
-            {
-                // Only enqueue TTS while a translation source is still running — OCR (Start
-                // button) or audio translation — so old translations are not read out after
-                // both are stopped. Audio-only use (e.g. dubbing game speech) must be spoken
-                // too, so OCR being off alone is not a reason to stay silent.
-                if (!string.IsNullOrEmpty(translatedText) &&
-                    ConfigManager.Instance.IsTtsEnabled() &&
-                    (MainWindow.Instance.GetIsStarted() || localWhisperService.Instance.IsRunning))
-                {
-                    if (textToSpeak != null)
-                    {
-                        // The name (if any) was at the start, which was already read
-                        EnqueueSpeechRequest(textToSpeak);
-                    }
-                    else if (ConfigManager.Instance.IsExcludeCharacterNameEnabled())
-                    {
-                        string[] text = translatedText.Split(':', 2);
-                        if (text.Length > 1)
-                        {
-                            EnqueueSpeechRequest(text[1]);
-                        }
-                        else
-                        {
-                            EnqueueSpeechRequest(text[0]);
-                        }
-                    }
-                    else
-                    {
-                        EnqueueSpeechRequest(translatedText);
-                    }
-                }
-            }
         }
 
         // Handle animation timer tick
@@ -1488,32 +1105,31 @@ namespace AlpWareStudio.Localay
 
         private bool _areBordersVisible = true;
 
-
         private void ToggleBordersButton_Click(object sender, RoutedEventArgs e)
         {
             _areBordersVisible = !_areBordersVisible;
-            
+
             if (_areBordersVisible)
             {
                 // Show border
                 headerBar.Visibility = Visibility.Visible;
-                
+
                 
                 if (translationStatusPanel.Tag != null && translationStatusPanel.Tag.ToString() == "Active")
                 {
                     translationStatusPanel.Visibility = Visibility.Visible;
                 }
-                
+
                 // Adjust scrollview margin
                 chatScrollViewer.Margin = new Thickness(0, 28, 0, 30);
-                
+
                 // Update icon
                 toggleBordersIcon.Data = Geometry.Parse("M 4,2 L 12,2 L 12,6 L 4,6 Z M 4,10 L 12,10 L 12,14 L 4,14 Z");
-                
+
                 // Re-enable interaction with chatbox content
                 chatScrollViewer.IsHitTestVisible = true;
                 chatHistoryText.IsHitTestVisible = true;
-                
+
                 // Re-enable resize grip and window resize
                 resizeGrip.IsHitTestVisible = true;
                 resizeGrip.Visibility = Visibility.Visible;
@@ -1527,18 +1143,18 @@ namespace AlpWareStudio.Localay
                 // Hide border
                 headerBar.Visibility = Visibility.Collapsed;
                 translationStatusPanel.Visibility = Visibility.Collapsed;
-                
+
                 // Adjust scrollview margin
                 chatScrollViewer.Margin = new Thickness(0, 0, 0, 0);
-                
+
                 // Update icon
                 toggleBordersIcon.Data = Geometry.Parse("M 2,4 L 14,4 L 14,6 L 2,6 Z M 2,10 L 14,10 L 14,12 L 2,12 Z");
-                
+
                 // Disable interaction with chatbox content (click-through mode)
                 // Only the toggle button remains clickable
                 chatScrollViewer.IsHitTestVisible = false;
                 chatHistoryText.IsHitTestVisible = false;
-                
+
                 // Disable resize grip and window resize
                 resizeGrip.IsHitTestVisible = false;
                 resizeGrip.Visibility = Visibility.Collapsed;

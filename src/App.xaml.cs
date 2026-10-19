@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
@@ -29,7 +29,7 @@ public partial class App : Application
         };
 
         // Catch unobserved task exceptions (e.g. from fire-and-forget async
-        // work like Supertonic warm-up) before they tear down the process.
+        // work) before they tear down the process.
         TaskScheduler.UnobservedTaskException += (sender, args) =>
         {
             WriteCrashLog("TaskScheduler.UnobservedTaskException", args.Exception);
@@ -169,8 +169,6 @@ public partial class App : Application
 
         try
         {
-            // Stop local whisper service
-            localWhisperService.Instance.StopForExit();
 
             // Clean up Logic resources
             Logic.Instance.Finish();

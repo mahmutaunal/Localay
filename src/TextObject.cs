@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -24,7 +24,7 @@ namespace AlpWareStudio.Localay
         public int ScreenIndex { get; set; }
         public double DpiScaleX { get; set; }
         public double DpiScaleY { get; set; }
-        
+
         public TranslationAreaInfo(Rect bounds, int screenIndex, double dpiScaleX, double dpiScaleY)
         {
             Bounds = bounds;
@@ -32,13 +32,13 @@ namespace AlpWareStudio.Localay
             DpiScaleX = dpiScaleX;
             DpiScaleY = dpiScaleY;
         }
-        
+
         public double X => Bounds.X;
         public double Y => Bounds.Y;
         public double Width => Bounds.Width;
         public double Height => Bounds.Height;
     }
-    
+
     public class TextObject
     {
         // Properties
@@ -122,7 +122,7 @@ namespace AlpWareStudio.Localay
                 VerticalAlignment = VerticalAlignment.Top,
                 Cursor = Cursors.Hand  // Change cursor to hand to indicate clickable
             };
-            
+
             // Position based on useRelativePosition parameter
             if (useRelativePosition)
             {
@@ -162,7 +162,6 @@ namespace AlpWareStudio.Localay
                     TextTrimming = TextTrimming.None
                 };
             }
-            
 
             ResetLayout();
             ApplyBoxConstraints();
@@ -183,7 +182,7 @@ namespace AlpWareStudio.Localay
 
             // Add click event handler
             // Border.MouseLeftButtonDown += Border_MouseLeftButtonDown;
-            
+
             // Add context menu for right-click options
             // Border.ContextMenu = CreateContextMenu();
 
@@ -208,7 +207,6 @@ namespace AlpWareStudio.Localay
             {
                 CreateUIElement();
             }
-
 
             if (TextBlock != null && Border != null)
             {
@@ -341,7 +339,7 @@ namespace AlpWareStudio.Localay
         {
             _fontSizeCache.Clear();
         }
-        
+
         // Line spacing as a multiple of font size; WPF's default (~1.3x) wastes space in small boxes
         private const double LineHeightRatio = 1.15;
         // The translation may shrink to this fraction of the estimated source font size, no smaller
@@ -392,7 +390,7 @@ namespace AlpWareStudio.Localay
                     ApplyFontSize(textBlock, 24);
                     return;
                 }
-                
+
                 // Exit early if dimensions aren't set or text is empty
                 if (Width <= 0 || Height <= 0 || string.IsNullOrWhiteSpace(textBlock.Text))
                 {
@@ -407,7 +405,7 @@ namespace AlpWareStudio.Localay
 
                 // Same length doesn't mean same rendered size, so key on the actual text and font
                 string cacheKey = $"{textBlock.FontFamily.Source}_{Width}_{LayoutWidth}_{Height}_{MinSourceSizeRatio}_{configMin}_{configMax}_{Text}_{textBlock.Text}";
-                
+
                 // Check cache
                 if (_fontSizeCache.TryGetValue(cacheKey, out var cached))
                 {
@@ -439,7 +437,7 @@ namespace AlpWareStudio.Localay
                 TextFitsBox = FitsAt(textBlock, finalSize);
                 textBlock.VerticalAlignment = VerticalAlignment.Stretch;
                 ApplyFontSize(textBlock, finalSize);
-                
+
                 // Cache result
                 if (_fontSizeCache.Count > 100) _fontSizeCache.Clear();
                 _fontSizeCache[cacheKey] = (finalSize, TextFitsBox);
@@ -487,54 +485,48 @@ namespace AlpWareStudio.Localay
         // Store original background color for each border to ensure we restore properly
         private static readonly ConditionalWeakTable<Border, SolidColorBrush> _originalBackgrounds = 
             new ConditionalWeakTable<Border, SolidColorBrush>();
-            
+
         // Create the context menu with Copy Source, Copy Translated, Speak Source, and Learn Source options
         private ContextMenu CreateContextMenu()
         {
             ContextMenu contextMenu = new ContextMenu();
-            
+
             // Copy Source menu item
             MenuItem copySourceMenuItem = new MenuItem();
             copySourceMenuItem.Header = "Copy Source";
             copySourceMenuItem.Click += CopySourceMenuItem_Click;
             contextMenu.Items.Add(copySourceMenuItem);
-            
+
             // Copy Translated menu item
             MenuItem copyTranslatedMenuItem = new MenuItem();
             copyTranslatedMenuItem.Header = "Copy Translated";
             copyTranslatedMenuItem.Click += CopyTranslatedMenuItem_Click;
             contextMenu.Items.Add(copyTranslatedMenuItem);
-            
+
             // Add a separator
             contextMenu.Items.Add(new Separator());
-            
+
             // Learn Source menu item
             MenuItem learnSourceMenuItem = new MenuItem();
             learnSourceMenuItem.Header = "Learn Source";
             learnSourceMenuItem.Click += LearnSourceMenuItem_Click;
             contextMenu.Items.Add(learnSourceMenuItem);
-            
-            // Speak Source menu item
-            MenuItem speakSourceMenuItem = new MenuItem();
-            speakSourceMenuItem.Header = "Speak Source";
-            speakSourceMenuItem.Click += SpeakSourceMenuItem_Click;
-            contextMenu.Items.Add(speakSourceMenuItem);
-            
+
             // Update menu item states when context menu is opened
             contextMenu.Opened += (s, e) => {
                 copyTranslatedMenuItem.IsEnabled = !string.IsNullOrEmpty(this.TextTranslated);
             };
-            
+
             return contextMenu;
         }
-        
+
         // Click handler for Copy Source menu item
         private void CopySourceMenuItem_Click(object sender, RoutedEventArgs e)
         {
             Clipboard.SetText(this.Text);
             PlayClickSound();
         }
-        
+
         // Click handler for Copy Translated menu item
         private void CopyTranslatedMenuItem_Click(object sender, RoutedEventArgs e)
         {
@@ -544,7 +536,7 @@ namespace AlpWareStudio.Localay
                 PlayClickSound();
             }
         }
-        
+
         // Click handler for Learn Source menu item
         private void LearnSourceMenuItem_Click(object sender, RoutedEventArgs e)
         {
@@ -556,14 +548,14 @@ namespace AlpWareStudio.Localay
                     string chatGptPrompt = $"Create a lesson to help me learn about this text and its translation: {this.Text}";
                     string encodedPrompt = System.Web.HttpUtility.UrlEncode(chatGptPrompt);
                     string chatGptUrl = $"https://chat.openai.com/?q={encodedPrompt}";
-                    
+
                     // Open in default browser
                     Process.Start(new ProcessStartInfo
                     {
                         FileName = chatGptUrl,
                         UseShellExecute = true
                     });
-                    
+
                     Console.WriteLine($"Opening ChatGPT with text: {this.Text.Substring(0, Math.Min(50, this.Text.Length))}...");
                 }
                 else
@@ -576,82 +568,9 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Error in Learn function: {ex.Message}");
             }
         }
-        
-        // Click handler for Speak Source menu item
-        private async void SpeakSourceMenuItem_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                if (!string.IsNullOrEmpty(this.Text))
-                {
-                    string text = this.Text.Trim();
-                    Console.WriteLine($"Speak function called with text: {text.Substring(0, Math.Min(50, text.Length))}...");
-                    
-                    // Check if TTS is enabled in config
-                    if (ConfigManager.Instance.IsTtsEnabled())
-                    {
-                        string ttsService = ConfigManager.Instance.GetTtsService();
-                        
-                        try
-                        {
-                            bool success = false;
-                            
-                            if (ttsService == "ElevenLabs")
-                            {
-                                success = await ElevenLabsService.Instance.SpeakText(text);
-                            }
-                            else if (ttsService == "Google Cloud TTS")
-                            {
-                                success = await GoogleTTSService.Instance.SpeakText(text);
-                            }
-                            else if (ttsService == "Windows TTS")
-                            {
-                                success = await WindowsTTSService.Instance.SpeakText(text);
-                            }
-                            else if (ttsService == "Supertonic")
-                            {
-                                success = await SupertonicTTSService.Instance.SpeakText(text);
-                            }
-                            else
-                            {
-                                System.Windows.MessageBox.Show($"Text-to-Speech service '{ttsService}' is not supported yet.",
-                                    "Unsupported Service", MessageBoxButton.OK, MessageBoxImage.Information);
-                                return;
-                            }
 
-                            if (!success)
-                            {
-                                System.Windows.MessageBox.Show($"Failed to generate speech using {ttsService}. Please check the API key and settings.",
-                                    "Text-to-Speech Error", MessageBoxButton.OK, MessageBoxImage.Warning);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"TTS error: {ex.Message}");
-                            System.Windows.MessageBox.Show($"Text-to-Speech error: {ex.Message}", 
-                                "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        }
-                    }
-                    else
-                    {
-                        System.Windows.MessageBox.Show("Text-to-Speech is disabled in settings. Please enable it first.",
-                            "TTS Disabled", MessageBoxButton.OK, MessageBoxImage.Information);
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("No text available for Speak function");
-                    System.Windows.MessageBox.Show("No text available to speak.",
-                        "No Text Available", MessageBoxButton.OK, MessageBoxImage.Information);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in Speak function: {ex.Message}");
-                System.Windows.MessageBox.Show($"Error: {ex.Message}", "Text-to-Speech Error", 
-                    MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
+        // Click handler for Speak Source menu item
+
         
         // Animate the border when clicked
         private void AnimateBorderOnClick(Border border)
@@ -673,7 +592,7 @@ namespace AlpWareStudio.Localay
 
                 // Get the color to return to (use stored value, not current which might be mid-animation)
                 Color targetColor = originalBrush?.Color ?? ((SolidColorBrush)border.Background).Color;
-                
+
                 // Create a new transform for this animation
                 var scaleTransform = new ScaleTransform(1.0, 1.0);
                 border.RenderTransform = scaleTransform;
@@ -700,7 +619,7 @@ namespace AlpWareStudio.Localay
 
                 // Create a new brush for the animation
                 SolidColorBrush animationBrush = new SolidColorBrush(Colors.Yellow);
-                
+
                 // When the color animation completes, reset to original background
                 colorAnimation.Completed += (s, e) => 
                 {

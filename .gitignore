@@ -460,3 +460,6 @@ crashdumps/
 .idea/
 .vscode/
 .DS_Store
+
+# CI and local portable output
+artifacts/

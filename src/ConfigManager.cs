@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -392,8 +392,6 @@ namespace AlpWareStudio.Localay
             _mistralConfigFilePath = Path.Combine(appDirectory, "mistral_config.txt");
             _googleTranslateConfigFilePath = Path.Combine(appDirectory, "google_translate_config.txt");
 
-            // Ensure the FunASR model folder exists so the settings UI can enumerate it
-            try { Directory.CreateDirectory(_funAsrModelFolderPath); } catch { }
 
             // Console.WriteLine($"Config file path: {_configFilePath}");
             // Console.WriteLine($"Profile folder path: {_profileFolderPath}");

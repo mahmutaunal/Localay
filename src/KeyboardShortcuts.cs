@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
@@ -11,9 +11,8 @@ namespace AlpWareStudio.Localay
     public static class KeyboardShortcuts
     {
         #region Events
-        
+
         public static event EventHandler? StartStopRequested;
-        public static event EventHandler? AudioServiceToggleRequested;
         public static event EventHandler? MonitorToggleRequested;
         public static event EventHandler? ChatBoxToggleRequested;
         public static event EventHandler? SettingsToggleRequested;
@@ -25,11 +24,11 @@ namespace AlpWareStudio.Localay
         public static event EventHandler? ClearAreasRequested;
         public static event EventHandler? RetryTranslationRequested;
         public static event EventHandler? ToggleExcludeRegionsRequested;
-        
+
         #endregion
-        
+
         #region Global Keyboard Hook
-        
+
         // For global keyboard hook
         [DllImport("user32.dll", SetLastError = true)]
         private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hInstance, uint threadId);
@@ -42,32 +41,32 @@ namespace AlpWareStudio.Localay
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         private static extern IntPtr GetModuleHandle(string lpModuleName);
-        
+
         // For getting key state
         [DllImport("user32.dll")]
         private static extern short GetAsyncKeyState(int vKey);
-        
+
         // For registering hotkeys
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-        
+
         [DllImport("user32.dll")]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-        
+
         // Constants for RegisterHotKey
         private const uint MOD_ALT = 0x0001;
         private const uint MOD_NOREPEAT = 0x4000;
         private const uint MOD_CONTROL = 0x0002;
         private const uint MOD_SHIFT = 0x0004;
-        
+
         private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-        
+
         private const int WH_KEYBOARD_LL = 13;
         private const int WM_KEYDOWN = 0x0100;
         private const int WM_KEYUP = 0x0101;
         private const int WM_SYSKEYDOWN = 0x0104;
         private const int WM_SYSKEYUP = 0x0105;
-        
+
         // Virtual key codes
         private const int VK_SHIFT = 0x10;
         private const int VK_CONTROL = 0x11;
@@ -93,7 +92,6 @@ namespace AlpWareStudio.Localay
             ("Area 3", () => SelectArea3Requested?.Invoke(null, EventArgs.Empty)),
             ("Area 4", () => SelectArea4Requested?.Invoke(null, EventArgs.Empty)),
             ("Area 5", () => SelectArea5Requested?.Invoke(null, EventArgs.Empty)),
-            ("Audio Service", () => AudioServiceToggleRequested?.Invoke(null, EventArgs.Empty)),
             ("Swap Languages", () => SwapLanguagesRequested?.Invoke(null, EventArgs.Empty)),
             ("Retry Translation", () => RetryTranslationRequested?.Invoke(null, EventArgs.Empty)),
             ("Select Exclude Region", () => ToggleExcludeRegionsRequested?.Invoke(null, EventArgs.Empty)),
@@ -121,7 +119,7 @@ namespace AlpWareStudio.Localay
         private static readonly object _hotkeyDispatchLock = new object();
         private static readonly Dictionary<string, DateTime> _lastHotkeyDispatchTimes = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan _hotkeyDispatchThreshold = TimeSpan.FromMilliseconds(250);
-        
+
         // Key polling system for global hotkeys only
         private static CancellationTokenSource? _pollingCts;
         private static bool _isPolling = false;
@@ -133,7 +131,7 @@ namespace AlpWareStudio.Localay
         public static event EventHandler? SelectArea4Requested;
         public static event EventHandler? SelectArea5Requested;
         public static event EventHandler? SwapLanguagesRequested;
-        
+
         static KeyboardShortcuts()
         {
             // Initialize key code map
@@ -142,18 +140,18 @@ namespace AlpWareStudio.Localay
                 char key = (char)('A' + i);
                 _keyCodeMap[key.ToString()] = 0x41 + i;
             }
-            
+
             for (int i = 0; i <= 9; i++) // 0-9
             {
                 _keyCodeMap[i.ToString()] = 0x30 + i;
             }
-            
+
             // Function keys
             for (int i = 1; i <= 12; i++)
             {
                 _keyCodeMap[$"F{i}"] = 0x70 + i - 1;
             }
-            
+
             // Other common keys
             _keyCodeMap["SPACE"] = 0x20;
             _keyCodeMap["TAB"] = 0x09;
@@ -344,7 +342,7 @@ namespace AlpWareStudio.Localay
         {
             // Parse all hotkeys from config
             RefreshHotkeys();
-            
+
             // Set up low-level keyboard hook
             if (_hookID == IntPtr.Zero) // Only set if not already set
             {
@@ -375,7 +373,7 @@ namespace AlpWareStudio.Localay
                 StartKeyPolling();
             }
         }
-        
+
         // Set the main window handle for hotkey registration
         public static void SetMainWindowHandle(IntPtr mainWindowHandle)
         {
@@ -415,7 +413,7 @@ namespace AlpWareStudio.Localay
             {
                 uint modifiers = hotkeyInfo.modifiers | MOD_NOREPEAT;
                 uint vkCode = (uint)hotkeyInfo.vkCode;
-                
+
                 if (RegisterHotKey(_mainWindowHandle, hotkeyId, modifiers, vkCode))
                 {
                     Console.WriteLine($"Registered {functionName} hotkey successfully");
@@ -427,7 +425,7 @@ namespace AlpWareStudio.Localay
                 }
             }
         }
-        
+
         private static bool TryReserveHotkeyDispatch(string function)
         {
             DateTime now = DateTime.UtcNow;
@@ -479,7 +477,7 @@ namespace AlpWareStudio.Localay
         {
             return InvokeHotkeyAction(function);
         }
-        
+
         // Start polling for key states as a backup method - ONLY for global shortcuts
         private static void StartKeyPolling()
         {
@@ -596,7 +594,7 @@ namespace AlpWareStudio.Localay
                 _pollingCts = null;
             }
         }
-        
+
         // Remove the hook and unregister hotkeys
         public static void CleanupGlobalHook()
         {
@@ -608,7 +606,7 @@ namespace AlpWareStudio.Localay
             {
                 UnregisterAllHotkeys();
             }
-            
+
             // Remove low-level keyboard hook
             if (_hookID != IntPtr.Zero)
             {
@@ -617,13 +615,13 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine("Global keyboard hook removed");
             }
         }
-        
+
         // Direct key state check for more reliable detection
         private static bool IsKeyPressed(int vkCode)
         {
             return (GetAsyncKeyState(vkCode) & 0x8000) != 0;
         }
-        
+
         // Keyboard hook callback
         private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
         {
@@ -687,9 +685,9 @@ namespace AlpWareStudio.Localay
         }
 
         #endregion
-        
+
         #region Standard Shortcut Handling
-        
+
         // Handle shortcut keys - for regular window event handling
         public static bool HandleKeyDown(System.Windows.Input.KeyEventArgs e)
         {
@@ -703,7 +701,7 @@ namespace AlpWareStudio.Localay
                 // With Alt held, WPF reports Key.System and puts the real key in SystemKey
                 Key key = e.Key == Key.System ? e.SystemKey : e.Key;
                 int vkCode = KeyInterop.VirtualKeyFromKey(key);
-                
+
                 // Check modifiers
                 uint modifiers = 0;
                 if ((e.KeyboardDevice.Modifiers & ModifierKeys.Alt) != 0)
@@ -712,13 +710,13 @@ namespace AlpWareStudio.Localay
                     modifiers |= MOD_CONTROL;
                 if ((e.KeyboardDevice.Modifiers & ModifierKeys.Shift) != 0)
                     modifiers |= MOD_SHIFT;
-                    
+
                 // Check if it matches any of our configured hotkeys
                 foreach (var kvp in _parsedHotkeys)
                 {
                     string function = kvp.Key;
                     var (configModifiers, configVkCode) = kvp.Value;
-                    
+
                     if (vkCode == configVkCode && modifiers == configModifiers)
                     {
                         // Invoke the associated event handler
@@ -734,10 +732,10 @@ namespace AlpWareStudio.Localay
             {
                 Console.WriteLine($"Error handling keyboard shortcut: {ex.Message}");
             }
-            
+
             return false;
         }
-        
+
         #endregion
     }
 }
