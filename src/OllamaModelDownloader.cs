@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Net.Http;
 using System.Text.Json;
@@ -44,7 +44,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 // Create or show the status window
-                ShowModelStatusWindow("Testing model...");
+                ShowModelStatusWindow("Model_Testing");
                 
                 // Check if model exists
                 bool modelExists = await CheckIfModelExists(model);
@@ -52,7 +52,7 @@ namespace AlpWareStudio.Localay
                 if (modelExists)
                 {
                     // Show success and close window after delay
-                    UpdateModelStatus("Model is available", 100);
+                    UpdateModelStatus("Model_Available", 100);
                     await Task.Delay(2000);
                     CloseModelStatusWindow();
                     return true;
@@ -72,7 +72,7 @@ namespace AlpWareStudio.Localay
                     {
                         // Show download status window
                         _isModelDownloading = true;
-                        ShowModelStatusWindow($"Downloading model {model}...");
+                        ShowModelStatusWindow("Model_Downloading", model);
                         
                         // Start download and monitor progress
                         await DownloadModel(model);
@@ -98,14 +98,13 @@ namespace AlpWareStudio.Localay
             }
         }
         
-        private void ShowModelStatusWindow(string initialMessage)
+        private void ShowModelStatusWindow(string key, params object[] args)
         {
             // Create a new window if it doesn't exist
             if (_modelStatusWindow == null)
             {
                 _modelStatusWindow = new Window
                 {
-                    Title = LocalizationManager.Instance.Strings["Title_OllamaModelStatus"],
                     Width = 400,
                     Height = 150,
                     WindowStartupLocation = WindowStartupLocation.CenterScreen,
@@ -113,6 +112,7 @@ namespace AlpWareStudio.Localay
                     WindowStyle = WindowStyle.ToolWindow
                 };
                 
+                UiText.Bind(_modelStatusWindow, Window.TitleProperty, "Title_OllamaModelStatus");
                 var grid = new Grid();
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(30) });
@@ -120,7 +120,6 @@ namespace AlpWareStudio.Localay
                 // Status text
                 _modelStatusText = new TextBlock
                 {
-                    Text = initialMessage,
                     HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
                     VerticalAlignment = System.Windows.VerticalAlignment.Center,
                     TextWrapping = TextWrapping.Wrap,
@@ -164,7 +163,7 @@ namespace AlpWareStudio.Localay
             // Update the message if window already exists
             if (_modelStatusText != null)
             {
-                _modelStatusText.Text = initialMessage;
+                UiText.Bind(_modelStatusText, TextBlock.TextProperty, key, args);
             }
             
             // Reset progress bar
@@ -179,11 +178,11 @@ namespace AlpWareStudio.Localay
             _modelStatusWindow.Activate();
         }
         
-        private void UpdateModelStatus(string message, int progressValue = -1)
+        private void UpdateModelStatus(string key, int progressValue = -1, params object[] args)
         {
             if (_modelStatusText != null)
             {
-                _modelStatusText.Text = message;
+                UiText.Bind(_modelStatusText, TextBlock.TextProperty, key, args);
             }
             
             if (_modelProgressBar != null)
@@ -350,14 +349,14 @@ namespace AlpWareStudio.Localay
                                                 {
                                                     lastProgress = progress;
                                                     Console.WriteLine($"Download progress: {progress}%");
-                                                    UpdateModelStatus($"Downloading {model}: {progress}%", progress);
+                                                    UpdateModelStatus("Model_Progress", progress, model, progress);
                                                 }
                                             }
                                         }
                                         else 
                                         {
                                             // Just display the status message
-                                            UpdateModelStatus($"Status: {status}");
+                                            UpdateModelStatus("Model_Processing");
                                         }
                                     }
                                     
@@ -365,7 +364,7 @@ namespace AlpWareStudio.Localay
                                     if (doc.RootElement.TryGetProperty("digest", out JsonElement digestElement))
                                     {
                                         // Digest property means download is complete
-                                        UpdateModelStatus($"Model {model} downloaded successfully!", 100);
+                                        UpdateModelStatus("Msg_ModelDownloadSuccess", 100, model);
                                         break;
                                     }
                                 }

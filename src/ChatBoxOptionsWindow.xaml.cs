@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -169,7 +169,7 @@ namespace AlpWareStudio.Localay
 
                 // Update auto clear timeout slider
                 autoClearTimeoutSlider.Value = _currentAutoClearChatTimeout;
-                autoClearTimeoutText.Text = _currentAutoClearChatTimeout <= 0 ? "Off" : $"{_currentAutoClearChatTimeout}s";
+                UiText.Bind(autoClearTimeoutText, TextBlock.TextProperty, _currentAutoClearChatTimeout <= 0 ? "Btn_Off" : "Common_Seconds", _currentAutoClearChatTimeout);
             }
             catch (Exception ex)
             {
@@ -227,7 +227,7 @@ namespace AlpWareStudio.Localay
                     
                     // Format color code + transparency indicator
                     string baseColor = $"#{_currentBackgroundColor.R:X2}{_currentBackgroundColor.G:X2}{_currentBackgroundColor.B:X2}";
-                    backgroundColorText.Text = $"{baseColor} (Transparent)";
+                    UiText.Bind(backgroundColorText, TextBlock.TextProperty, "Common_Transparent", baseColor);
                 }
                 else
                 {
@@ -391,7 +391,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error saving settings: {ex.Message}");
-                MessageBox.Show($"Error saving settings: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(UiText.Format("Msg_SaveSettingsError", ex.Message), UiText.Get("Title_Error"), MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -479,7 +479,7 @@ namespace AlpWareStudio.Localay
             if (autoClearTimeoutText != null)
             {
                 _currentAutoClearChatTimeout = (int)Math.Round(autoClearTimeoutSlider.Value);
-                autoClearTimeoutText.Text = _currentAutoClearChatTimeout <= 0 ? "Off" : $"{_currentAutoClearChatTimeout}s";
+                UiText.Bind(autoClearTimeoutText, TextBlock.TextProperty, _currentAutoClearChatTimeout <= 0 ? "Btn_Off" : "Common_Seconds", _currentAutoClearChatTimeout);
             }
         }
 

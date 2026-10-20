@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -199,19 +199,19 @@ namespace AlpWareStudio.Localay
                 if (!double.TryParse(languageFontSizeMinTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double minSize) ||
                     !double.TryParse(languageFontSizeMaxTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double maxSize))
                 {
-                    MessageBox.Show("Font sizes must be valid numbers.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(UiText.Get("Msg_FontNumbers"), UiText.Get("Title_InvalidInput"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 if (minSize < 0 || maxSize < 0)
                 {
-                    MessageBox.Show("Font sizes cannot be negative.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(UiText.Get("Msg_FontNegative"), UiText.Get("Title_InvalidInput"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
                 if (minSize > maxSize)
                 {
-                    MessageBox.Show("Minimum font size cannot be greater than maximum font size.", "Invalid Input", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show(UiText.Get("Msg_FontRange"), UiText.Get("Title_InvalidInput"), MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
 
@@ -244,7 +244,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error saving settings: {ex.Message}");
-                MessageBox.Show($"Error saving settings: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(UiText.Format("Msg_SaveSettingsError", ex.Message), UiText.Get("Title_Error"), MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 

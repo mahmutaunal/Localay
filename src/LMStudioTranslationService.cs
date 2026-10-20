@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -81,7 +81,7 @@ namespace AlpWareStudio.Localay
                         if (string.IsNullOrEmpty(responseText))
                         {
                             Console.WriteLine("Could not find response text in LM Studio API response");
-                            Console.WriteLine($"Raw response: {jsonResponse}");
+                            LogManager.Instance.WriteContentLine($"Raw response: {jsonResponse}");
                             return null;
                         }
                         
@@ -186,14 +186,14 @@ namespace AlpWareStudio.Localay
                     catch (JsonException jex)
                     {
                         Console.WriteLine($"Error parsing LM Studio response: {jex.Message}");
-                        Console.WriteLine($"Raw response: {jsonResponse}");
+                        LogManager.Instance.WriteContentLine($"Raw response: {jsonResponse}");
                         return null;
                     }
                 }
                 else
                 {
                     string errorMessage = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine($"LM Studio API error: {response.StatusCode}, {errorMessage}");
+                    LogManager.Instance.WriteContentLine($"LM Studio API error: {response.StatusCode}, {errorMessage}");
                     
                     // Try to parse the error message from JSON if possible
                     try

@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Interop;
 using System.Drawing.Imaging;
 using Color = System.Windows.Media.Color;
+using Control = System.Windows.Controls.Control;
 using System.Windows.Threading;
 using System.Drawing.Drawing2D;
 using System.Diagnostics;
@@ -136,10 +137,6 @@ namespace AlpWareStudio.Localay
         private ChatBoxWindow? chatBoxWindow;
         private bool isChatBoxVisible = false;
         private bool isSelectingChatBoxArea = false;
-        // Compact view (hotkeys/details) state
-        private bool _isCompactView = true;
-        // Saved window height to restore after expanding from compact view
-        private double _savedWindowHeightForCompact = double.NaN;
         // private bool _chatBoxEventsAttached = false;
 
         // Keep translation history even when ChatBox is closed
@@ -249,7 +246,7 @@ namespace AlpWareStudio.Localay
             Console.WriteLine($"Setting OCR method during initialization: {method}");
             selectedOcrMethod = method;
             // Update status text
-            SetStatus(string.Format(LocalizationManager.Instance.Strings["Status_UsingBuiltInOcr"], method));
+            SetOcrStatus(method);
             // return;
             // }
 
@@ -264,7 +261,7 @@ namespace AlpWareStudio.Localay
                     OnStartButtonToggleClicked(toggleButton, new RoutedEventArgs());
                 }
 
-                SetStatus(string.Format(LocalizationManager.Instance.Strings["Status_UsingBuiltInOcr"], method));
+                SetOcrStatus(method);
             }
         }
 
@@ -311,6 +308,10 @@ namespace AlpWareStudio.Localay
 
             _this = this;
             InitializeComponent();
+            _syncingInterfacePreferences = true;
+            InterfaceLanguageOptions.Populate(languageSelector);
+            _syncingInterfacePreferences = false;
+            ApplicationPreferences.Changed += ApplicationPreferences_Changed;
             ApplyLanguageItemTemplate(sourceLanguageComboBox);
             ApplyLanguageItemTemplate(targetLanguageComboBox);
             GetVersionWindows();
@@ -489,8 +490,8 @@ namespace AlpWareStudio.Localay
                 }
             };
 
-            // Set up global keyboard hook to handle shortcuts even when console has focus
-            KeyboardShortcuts.InitializeGlobalHook();
+            // Register configured shortcut combinations with Windows.
+            KeyboardShortcuts.InitializeGlobalHotkeys();
 
             // Load exclude regions from config
             LoadExcludeRegions();
@@ -749,7 +750,7 @@ namespace AlpWareStudio.Localay
             {
                 // Cancel translation region selection if active
                 isSelectingTranslationArea = false;
-                selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+                selectAreaButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
 
                 // Find and close the region selection window if currently open
                 foreach (Window window in System.Windows.Application.Current.Windows)
@@ -776,13 +777,13 @@ namespace AlpWareStudio.Localay
                 isSelectingTranslationArea = false;
                 if (!hasSelectedTranslationArea)
                 {
-                    selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+                    selectAreaButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
                 }
             };
             selectorWindow.Show();
 
             isSelectingTranslationArea = true;
-            selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+            selectAreaButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
         }
 
         // Handle the event when translation region is selected
@@ -833,9 +834,9 @@ namespace AlpWareStudio.Localay
             // Update capture for new selection area
             UpdateCustomCaptureRect();
 
-            selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(20, 180, 20)); // Green
+            selectAreaButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
 
-            CoachMarkTour.Current?.OnAreaChosen();
+            CoachMarkTour.Current?.OnCaptureChosen();
         }
 
         public void SwitchToTranslationArea(int index)
@@ -900,7 +901,7 @@ namespace AlpWareStudio.Localay
 
             var text = new TextBlock
             {
-                Text = $"Switched to Selection Area {areaNumber}",
+                Text = UiText.Format("Status_AreaSwitched", areaNumber),
                 Foreground = new SolidColorBrush(Colors.White),
                 FontWeight = FontWeights.Bold,
                 HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
@@ -933,6 +934,7 @@ namespace AlpWareStudio.Localay
         // Set capture area to selected region
         private void UpdateCustomCaptureRect()
         {
+            RefreshWorkflowSummary();
             if (!hasSelectedTranslationArea) return;
 
             captureRect = new System.Drawing.Rectangle(
@@ -958,7 +960,7 @@ namespace AlpWareStudio.Localay
             if (!MonitorWindow.Instance.IsVisible)
             {
                 MonitorWindow.Instance.Show();
-                monitorButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+                SetResultButtonState(monitorButton, true);
             }
 
             // Use SetWindowPos with physical pixel coordinates to bypass WPF's coordinate system.
@@ -983,7 +985,7 @@ namespace AlpWareStudio.Localay
         {
             if (MainBorder.Visibility == Visibility.Visible)
             {
-                HideButton_Click(hideButton, new RoutedEventArgs());
+                HideButton_Click(this, new RoutedEventArgs());
             }
             else
             {
@@ -995,11 +997,11 @@ namespace AlpWareStudio.Localay
 
         }
 
-        public void SetStatus(string text)
+        public void SetOcrStatus(string method)
         {
             if (socketStatusText != null)
             {
-                socketStatusText!.Text = text;
+                UiText.Bind(socketStatusText, TextBlock.TextProperty, "Status_UsingBuiltInOcr", method);
             }
         }
 
@@ -1008,7 +1010,7 @@ namespace AlpWareStudio.Localay
             // Create socket status text
             socketStatusText = new TextBlock
             {
-                Text = "Connecting to Python backend...",
+                Text = UiText.Get("Status_BackendConnecting"),
                 Foreground = new SolidColorBrush(Colors.Red),
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -1020,35 +1022,16 @@ namespace AlpWareStudio.Localay
         {
             try
             {
-            // Play entrance animations
+            FitInitialWindowToScreen();
             PlayEntranceAnimations();
 
-            // Update capture rectangle
+            // Update capture rectangle and the initial selection summary.
             UpdateCaptureRect();
+            RefreshWorkflowSummary();
             SettingsWindow.Instance.ListHotKey_TextChanged();
 
-            // Update app version on setup screen
-            AppVersion.Text = LocalizationManager.Instance.Strings["App_Version"] + " " + SplashManager.FormatVersion(SplashManager.CurrentVersion);
-
-            // Add socket status to the header
-            if (FooterBorder != null && FooterBorder.Child is Grid footerGrid)
-            {
-                // Find the StackPanel in the header
-                var elements = footerGrid.Children;
-                foreach (var element in elements)
-                {
-                    if (element is StackPanel stackPanel &&
-                        stackPanel.HorizontalAlignment == System.Windows.HorizontalAlignment.Left)
-                    {
-                        // Add socket status text to the stack panel
-                        if (socketStatusText != null)
-                        {
-                            stackPanel.Children.Add(socketStatusText);
-                        }
-                        break;
-                    }
-                }
-            }
+            // Keep the version visible without an information card.
+            AppVersion.Text = LocalizationManager.Instance.Strings["App_Version"] + " " + AppRelease.Version;
 
             // Initialize the Logic
             Logic.Instance.Init();
@@ -1066,16 +1049,7 @@ namespace AlpWareStudio.Localay
             // Test configuration loading
             TestConfigLoading();
 
-            // Load language interface settings
-            string currentLang = ConfigManager.Instance.GetLanguageInterface();
-            foreach (ComboBoxItem item in languageSelector.Items)
-            {
-                if (item.Tag.ToString() == currentLang)
-                {
-                    languageSelector.SelectedItem = item;
-                    break;
-                }
-            }
+            SyncInterfacePreferences();
             UpdateThemeToggleButtonUI();
 
             // Initialization is complete, now we can save settings changes
@@ -1154,7 +1128,7 @@ namespace AlpWareStudio.Localay
                 string translationService = ConfigManager.Instance.GetCurrentTranslationService();
 
                 Console.WriteLine("=== Configuration Test ===");
-                Console.WriteLine($"API Key: {(string.IsNullOrEmpty(apiKey) ? "Not set" : "Set - " + apiKey.Substring(0, 4) + "...")}");
+                Console.WriteLine("API credentials loaded.");
                 Console.WriteLine($"LLM Prompt: {(string.IsNullOrEmpty(llmPrompt) ? "Not set" : "Set - " + llmPrompt.Length + " chars")}");
                 Console.WriteLine($"OCR Method: {ocrMethod}");
                 Console.WriteLine($"Translation Service: {translationService}");
@@ -1317,15 +1291,29 @@ namespace AlpWareStudio.Localay
         {
             System.Windows.Controls.Button btn = (System.Windows.Controls.Button)sender;
             String method = ConfigManager.Instance.GetOcrMethod();
-            // Only built-in OCR (OneOCR, Windows OCR) is supported now - always ready
+            if (!isStarted && !hasSelectedTranslationArea && !isCapturingWindow)
+            {
+                System.Windows.MessageBox.Show(LocalizationManager.Instance["Main_CaptureRequired"],
+                    "Localay", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            if (!isStarted && method == "Windows OCR" &&
+                !WindowsOCRManager.Instance.CheckLanguagePackInstall(ConfigManager.Instance.GetSourceLanguage()))
+            {
+                System.Windows.MessageBox.Show(LocalizationManager.Instance["Msg_WindowsOcrLanguageRequired"],
+                    "Localay", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
             bool isReady = true;
 
             if (isStarted)
             {
                 Logic.Instance.ResetHash();
                 isStarted = false;
-                btn.SetBinding(ContentControl.ContentProperty, new System.Windows.Data.Binding("Strings[Btn_Start]") { Source = LocalizationManager.Instance });
-                btn.Background = new SolidColorBrush(Color.FromRgb(20, 180, 20)); // Green                                                   
+                btn.SetBinding(ContentControl.ContentProperty, new System.Windows.Data.Binding("Strings[Main_Start]") { Source = LocalizationManager.Instance });
+                btn.SetResourceReference(Control.BackgroundProperty, "AccentBrush");
+                RefreshWorkflowSummary();
                 Logic.Instance.ClearAllTextObjects();
                 MonitorWindow.Instance.RefreshOverlays();
                 MonitorWindow.Instance.HideTranslationStatus();
@@ -1345,10 +1333,11 @@ namespace AlpWareStudio.Localay
                     isStopOCR = false;
                     // Prepare the translation service so the first OCR line is not slower
                     TranslationWarmUp.Start();
-                    btn.SetBinding(ContentControl.ContentProperty, new System.Windows.Data.Binding("Strings[Btn_Stop]") { Source = LocalizationManager.Instance });
+                    btn.SetBinding(ContentControl.ContentProperty, new System.Windows.Data.Binding("Strings[Main_Stop]") { Source = LocalizationManager.Instance });
                     UpdateCaptureRect();
                     SetOCRCheckIsWanted(true);
-                    btn.Background = new SolidColorBrush(Color.FromRgb(220, 0, 0)); // Red
+                    btn.SetResourceReference(Control.BackgroundProperty, "DangerBrush");
+                    RefreshWorkflowSummary();
                     ShowFastNotification(LocalizationManager.Instance.Strings["NotificationTitle_TranslationStarted"], LocalizationManager.Instance.Strings["NotificationMessage_TranslationStarted_Details"]);
                     StartStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(20, 180, 20)); // Green
                     StartStatusText.Text = LocalizationManager.Instance.Strings["Btn_On"];
@@ -1432,7 +1421,7 @@ namespace AlpWareStudio.Localay
             {
                 showButton = new System.Windows.Controls.Button
                 {
-                    Content = "Show",
+                    Content = UiText.Get("Btn_Show"),
                     Width = 30,
                     Height = 20,
                     Padding = new Thickness(2, 0, 2, 0),
@@ -1522,11 +1511,9 @@ namespace AlpWareStudio.Localay
 
         protected override void OnClosed(EventArgs e)
         {
+            ApplicationPreferences.Changed -= ApplicationPreferences_Changed;
             // Remove global keyboard hook
-            KeyboardShortcuts.CleanupGlobalHook();
-
-            // Clean up MouseManager resources
-            MouseManager.Instance.Cleanup();
+            KeyboardShortcuts.CleanupGlobalHotkeys();
 
             // Clean up clipboard monitor
             ClipboardMonitor.Instance.StopListening();
@@ -1569,7 +1556,7 @@ namespace AlpWareStudio.Localay
 
                 SettingsWindow.Instance.Hide();
                 Console.WriteLine("Settings window hidden");
-                settingsButton.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(108, 117, 125));
+                SetResultButtonState(settingsButton, false);
             }
             else
             {
@@ -1595,7 +1582,7 @@ namespace AlpWareStudio.Localay
 
                 SettingsWindow.Instance.Show();
                 Console.WriteLine($"Settings window shown at position {SettingsWindow.Instance.Left}, {SettingsWindow.Instance.Top}");
-                settingsButton.Background = new SolidColorBrush(Color.FromRgb(176, 125, 69)); // Orange
+                SetResultButtonState(settingsButton, true);
             }
         }
 
@@ -2039,10 +2026,10 @@ namespace AlpWareStudio.Localay
             Logic.Instance.ResetHash();
 
             // Show notification with new language pair
-            string title = LocalizationManager.Instance["Title_LanguageSwapped"] ?? "Language Swapped";
-            string sourceLabel = LocalizationManager.Instance["Lbl_SourceLanguage"] ?? "Source";
-            string targetLabel = LocalizationManager.Instance["Lbl_TargetLanguage"] ?? "Target";
-            string message = $"{sourceLabel}: {currentTarget}\n{targetLabel}: {currentSource}";
+            string title = UiText.Get("Title_LanguageSwapped");
+            string sourceLabel = UiText.Get("Lbl_SourceLanguage");
+            string targetLabel = UiText.Get("Lbl_TargetLanguage");
+            string message = $"{sourceLabel} {LanguageDisplay.GetShortName(currentTarget)}\n{targetLabel} {LanguageDisplay.GetShortName(currentSource)}";
             ShowFastNotification(title, message);
 
             Console.WriteLine($"Languages swapped via hotkey: {currentSource} ⇄ {currentTarget}");
@@ -2064,15 +2051,15 @@ namespace AlpWareStudio.Localay
                     // Clear any existing text objects
                     Logic.Instance.ClearAllTextObjects();
 
-                    SetStatus(string.Format(LocalizationManager.Instance.Strings["Status_UsingBuiltInOcr"], ocrMethod));
+                    SetOcrStatus(ocrMethod);
                     OCRStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(69, 176, 105)); // Green
                     OCRStatusText.Text = LocalizationManager.Instance.Strings["Btn_On"];
                 }
             }
         }
 
-        // Keep track of selected OCR method (default: OneOCR)
-        private string selectedOcrMethod = "OneOCR";
+        // Keep track of the selected OCR method.
+        private string selectedOcrMethod = "Windows OCR";
 
         public string GetSelectedOcrMethod()
         {
@@ -2121,7 +2108,7 @@ namespace AlpWareStudio.Localay
             {
                 // Hide log window
                 LogWindow.Instance.Hide();
-                logButton.Background = new SolidColorBrush(Color.FromRgb(153, 69, 176)); // Purple
+                updateLogButtonState(false);
             }
             else
             {
@@ -2129,7 +2116,7 @@ namespace AlpWareStudio.Localay
                 // Set MainWindow as owner to ensure Log window appears above it
                 LogWindow.Instance.Owner = this;
                 LogWindow.Instance.Show();
-                logButton.Background = new SolidColorBrush(Color.FromRgb(176, 69, 153)); // Pink/Red
+                updateLogButtonState(true);
             }
         }
 
@@ -2175,7 +2162,7 @@ namespace AlpWareStudio.Localay
             {
                 AutoFlush = true
             };
-            Console.SetOut(standardOutput);
+            Console.SetOut(new RedactingTextWriter(standardOutput));
 
             // Write initial message
             Console.WriteLine("Console output initialized. Toggle visibility with the Log button.");
@@ -2227,9 +2214,7 @@ namespace AlpWareStudio.Localay
         // Update log button state (called from LogWindow when it's closed)
         public void updateLogButtonState(bool isVisible)
         {
-            logButton.Background = isVisible
-                ? new SolidColorBrush(Color.FromRgb(176, 69, 153)) // Pink/Red - visible
-                : new SolidColorBrush(Color.FromRgb(153, 69, 176)); // Purple - hidden
+            logButton.IsChecked = isVisible;
         }
 
         // Remember the monitor window position
@@ -2240,7 +2225,7 @@ namespace AlpWareStudio.Localay
         {
             MonitorWindow.Instance.imageScrollViewer.Visibility = Visibility.Collapsed;
             Console.WriteLine("Monitor window hidden from MainWindow toggle");
-            monitorButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+            SetResultButtonState(monitorButton, false);
             if (notify)
             {
                 ShowFastNotification(LocalizationManager.Instance.Strings["NotificationTitle_OverlayHidden"], LocalizationManager.Instance.Strings["NotificationMessage_OverlayHidden_Details"]);
@@ -2259,7 +2244,7 @@ namespace AlpWareStudio.Localay
             // {
             //     MonitorWindow.Instance.Show();
             //     Console.WriteLine("Monitor window shown from MainWindow toggle");
-            //     monitorButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+            //     SetResultButtonState(monitorButton, true);
             // }
             else
             {
@@ -2306,7 +2291,7 @@ namespace AlpWareStudio.Localay
                     // Refresh overlays
                     MonitorWindow.Instance.RefreshOverlays();
 
-                    monitorButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+                    SetResultButtonState(monitorButton, true);
                     Console.WriteLine("MonitorWindow setup complete");
                     ShowFastNotification(LocalizationManager.Instance.Strings["NotificationTitle_OverlayVisible"], LocalizationManager.Instance.Strings["NotificationMessage_OverlayVisible_Details"]);
                     OverlayStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(69, 176, 105)); // Green
@@ -2452,7 +2437,7 @@ namespace AlpWareStudio.Localay
             {
                 // Cancel the selection mode if already selecting
                 isSelectingChatBoxArea = false;
-                chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(69, 176, 105)); // Blue
+                SetResultButtonState(chatBoxButton, false);
 
                 // Find and close any existing selector window
                 foreach (Window window in System.Windows.Application.Current.Windows)
@@ -2495,7 +2480,7 @@ namespace AlpWareStudio.Localay
                 }
 
                 isChatBoxVisible = false;
-                chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(69, 176, 105)); // Blue
+                SetResultButtonState(chatBoxButton, false);
             }
             else if (!isChatBoxVisible && !recreateOnShow)
             {
@@ -2528,7 +2513,7 @@ namespace AlpWareStudio.Localay
                     // Show the chatbox
                     chatBoxWindow.Show();
                     isChatBoxVisible = true;
-                    chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+                    SetResultButtonState(chatBoxButton, true);
                 }
                 else
                 {
@@ -2566,7 +2551,7 @@ namespace AlpWareStudio.Localay
                     // Only set button to blue if the ChatBox isn't visible (was cancelled)
                     if (!isChatBoxVisible || chatBoxWindow == null || !chatBoxWindow.IsVisible)
                     {
-                        chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(69, 176, 105)); // Blue
+                        SetResultButtonState(chatBoxButton, false);
                     }
                 };
                 selectorWindow.Show();
@@ -2574,7 +2559,7 @@ namespace AlpWareStudio.Localay
 
                 // Set button to red while selector is active
                 isSelectingChatBoxArea = true;
-                chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
+                SetResultButtonState(chatBoxButton, true);
             }
             catch (Exception ex)
             {
@@ -2588,7 +2573,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 isChatBoxVisible = false;
-                chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+                SetResultButtonState(chatBoxButton, false);
             }
             finally
             {
@@ -2618,7 +2603,7 @@ namespace AlpWareStudio.Localay
                     else
                     {
                         isChatBoxVisible = false;
-                        chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+                        SetResultButtonState(chatBoxButton, false);
                     }
                 }
             }
@@ -2696,7 +2681,7 @@ namespace AlpWareStudio.Localay
                 chatBoxWindow.Show();
             }
             isChatBoxVisible = true;
-            chatBoxButton.Background = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red when active
+            SetResultButtonState(chatBoxButton, true);
 
             // The ChatBox will get its data from MainWindow.GetTranslationHistory()
             // No need to manually load entries, just trigger an update
@@ -2705,27 +2690,6 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Updating ChatBox with {_translationHistory.Count} translation entries");
                 chatBoxWindow.UpdateChatHistory();
             }
-        }
-
-        // Work-area height (DIPs) of the monitor this window is on. SystemParameters.WorkArea is
-        // always the primary monitor, which is wrong when the window sits on another screen.
-        private double GetCurrentWorkAreaHeight()
-        {
-            try
-            {
-                IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
-                if (hwnd != IntPtr.Zero)
-                {
-                    var screen = System.Windows.Forms.Screen.FromHandle(hwnd);
-                    double scaleY = VisualTreeHelper.GetDpi(this).DpiScaleY;
-                    return screen.WorkingArea.Height / scaleY;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error getting work area: {ex.Message}");
-            }
-            return SystemParameters.WorkArea.Height;
         }
 
         private static void SaveChatBoxPositionToConfig(ChatBoxWindow window)
@@ -2807,25 +2771,16 @@ namespace AlpWareStudio.Localay
 
         private void clearSelectedArea()
         {
-            int numberAreaCount = savedTranslationAreas.Count;
-            if (numberAreaCount <= 0)
+            if (savedTranslationAreas.Count == 0 || currentAreaIndex < 0 || currentAreaIndex >= savedTranslationAreas.Count)
+                return;
+            if (savedTranslationAreas.Count == 1)
             {
-                Console.WriteLine("No previous area to clear");
+                // Keep the summary and running state consistent with clearing all areas.
+                btnClearSelectionArea_Click(this, new RoutedEventArgs());
                 return;
             }
-            else
-            {
-
-                // Remove the last area from the list
-                savedTranslationAreas.RemoveAt(currentAreaIndex);
-
-                // Default switch to area last index
-                if (savedTranslationAreas.Count >= 1)
-                {
-                    SwitchToTranslationArea(savedTranslationAreas.Count - 1);
-                }
-            }
-            Console.WriteLine("Previous translation area have been removed.");
+            savedTranslationAreas.RemoveAt(currentAreaIndex);
+            SwitchToTranslationArea(savedTranslationAreas.Count - 1);
         }
 
         private void btnClearSelectionArea_Click(object sender, RoutedEventArgs e)
@@ -2839,265 +2794,82 @@ namespace AlpWareStudio.Localay
             savedTranslationAreas.Clear();
             hasSelectedTranslationArea = false;
             currentAreaIndex = -1;
+            if (isStarted && !isCapturingWindow) OnStartButtonToggleClicked(toggleButton, new RoutedEventArgs());
 
-            // Set button background to blue
-            selectAreaButton.Background = new SolidColorBrush(Color.FromRgb(69, 105, 176)); // Blue
+            // Restore the neutral selection control.
+            selectAreaButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
 
             // Update capture area to default area
             UpdateCaptureRect();
 
             Console.WriteLine("All translation areas have been cleared.");
 
-            // Show notification
-            System.Windows.MessageBox.Show("All translation areas have been cleared.",
-                            "Areas Cleared",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information);
+            RefreshWorkflowSummary();
         }
 
-        // ========== ENTRANCE ANIMATIONS ==========
+        private void FitInitialWindowToScreen() => DpiHelper.FitWindowToWorkArea(this, center: true);
+
         private void PlayEntranceAnimations()
         {
-            var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-
-            // 1. Fade-in the entire window
-            var windowFadeIn = new DoubleAnimation
-            {
-                From = 0,
-                To = 1,
-                Duration = TimeSpan.FromMilliseconds(300),
-                EasingFunction = ease
-            };
-            this.BeginAnimation(Window.OpacityProperty, windowFadeIn);
-
-            // 2. Slide down + fade in the MainBorder (main content area)
-            if (MainBorder != null)
-            {
-                MainBorder.RenderTransform = new TranslateTransform(0, -20);
-                MainBorder.Opacity = 0;
-
-                var slideDown = new DoubleAnimation
-                {
-                    From = -20,
-                    To = 0,
-                    Duration = TimeSpan.FromMilliseconds(400),
-                    EasingFunction = ease,
-                    BeginTime = TimeSpan.FromMilliseconds(100)
-                };
-                var fadeIn = new DoubleAnimation
-                {
-                    From = 0,
-                    To = 1,
-                    Duration = TimeSpan.FromMilliseconds(400),
-                    EasingFunction = ease,
-                    BeginTime = TimeSpan.FromMilliseconds(100)
-                };
-
-                MainBorder.RenderTransform.BeginAnimation(TranslateTransform.YProperty, slideDown);
-                MainBorder.BeginAnimation(UIElement.OpacityProperty, fadeIn);
-            }
-
-            // 3. Staggered animation for toolbar buttons (tool groups)
-            AnimateToolbarGroups();
-        }
-
-        private void AnimateToolbarGroups()
-        {
-            // Find toolbar WrapPanel
-            var toolbar = FindVisualChild<WrapPanel>(this);
-            if (toolbar == null) return;
-
-            var ease = new QuadraticEase { EasingMode = EasingMode.EaseOut };
-            int index = 0;
-
-            foreach (var child in toolbar.Children)
-            {
-                if (child is Border border && border.Style == (Style)FindResource("ToolGroupStyle"))
-                {
-                    // Set initial state
-                    border.Opacity = 0;
-                    border.RenderTransform = new TranslateTransform(0, 15);
-                    border.RenderTransformOrigin = new System.Windows.Point(0.5, 0.5);
-
-                    // Staggered delay for each group
-                    int delay = 200 + (index * 60);
-
-                    var fadeIn = new DoubleAnimation
-                    {
-                        From = 0,
-                        To = 1,
-                        Duration = TimeSpan.FromMilliseconds(350),
-                        EasingFunction = ease,
-                        BeginTime = TimeSpan.FromMilliseconds(delay)
-                    };
-
-                    var slideUp = new DoubleAnimation
-                    {
-                        From = 15,
-                        To = 0,
-                        Duration = TimeSpan.FromMilliseconds(350),
-                        EasingFunction = ease,
-                        BeginTime = TimeSpan.FromMilliseconds(delay)
-                    };
-
-                    border.BeginAnimation(UIElement.OpacityProperty, fadeIn);
-                    border.RenderTransform.BeginAnimation(TranslateTransform.YProperty, slideUp);
-
-                    index++;
-                }
-            }
-        }
-
-        // Helper to find visual child of specific type
-        private T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
-        {
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-            {
-                var child = VisualTreeHelper.GetChild(parent, i);
-                if (child is T result)
-                    return result;
-                var childOfChild = FindVisualChild<T>(child);
-                if (childOfChild != null)
-                    return childOfChild;
-            }
-            return null;
-        }
-
-        // Toggle compact/hotkeys UI (MainWindow) ---------------------------------
-        private void SetCompactView(bool isCompact)
-        {
-            _isCompactView = isCompact;
-            // Always marshal to UI thread for layout/size changes
-            if (!Dispatcher.CheckAccess())
-            {
-                Dispatcher.Invoke(() => SetCompactView(isCompact));
-                return;
-            }
-
-            // If window is not in normal state (maximized/minimized), just toggle visibility and skip resizing
-            if (this.WindowState != WindowState.Normal)
-            {
-                CollapsibleMainContent.Visibility = _isCompactView ? Visibility.Collapsed : Visibility.Visible;
-                if (compactToggleIcon != null) compactToggleIcon.Text = _isCompactView ? "▸" : "▾";
-                if (compactToggleButton != null) compactToggleButton.ToolTip = LocalizationManager.Instance.Strings[_isCompactView ? "Btn_Compact_Show" : "Btn_Compact_Hide"];
-                return;
-            }
-
-            // COLLAPSE: save current height then remove the collapsible content and shrink window height
-            if (_isCompactView)
-            {
-                // ensure layout is up-to-date so ActualHeight is meaningful
-                this.UpdateLayout();
-
-                // Save current window height so we can restore on expand
-                if (!double.IsNaN(this.Height) && this.Height > 0)
-                {
-                    _savedWindowHeightForCompact = this.Height;
-                }
-
-                double contentHeight = CollapsibleMainContent.ActualHeight;
-                // If ActualHeight is zero (rare), try DesiredSize after Measure
-                if (contentHeight <= 0)
-                {
-                    CollapsibleMainContent.Measure(new System.Windows.Size(this.ActualWidth, double.PositiveInfinity));
-                    contentHeight = CollapsibleMainContent.DesiredSize.Height;
-                }
-
-                // Hide the collapsible content and shrink the window (respect MinHeight and screen work area)
-                CollapsibleMainContent.Visibility = Visibility.Collapsed;
-
-                // Ensure InfoSectionGrid remains visible after shrinking. Measure on the dispatcher once layout settles.
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        this.UpdateLayout();
-
-                        // Height of the collapsible content (we already measured above)
-                        double collapseAmount = contentHeight;
-
-                        // Conservative target: reduce by collapseAmount but ensure InfoSectionGrid + footer are visible
-                        double tentative = Math.Max(this.MinHeight, this.ActualHeight - Math.Round(collapseAmount));
-
-                        // Compute required client-space height to fully show InfoSectionGrid + footer
-                        double infoTop = 0;
-                        double infoHeight = 0;
-                        if (InfoSectionGrid != null)
-                        {
-                            var t = InfoSectionGrid.TransformToAncestor(this);
-                            var p = t.Transform(new System.Windows.Point(0, 0));
-                            infoTop = p.Y;
-                            infoHeight = InfoSectionGrid.ActualHeight;
-                        }
-
-                        double footerH = (FooterBorder != null) ? FooterBorder.ActualHeight : 40.0;
-                        double requiredClient = infoTop + infoHeight + footerH + 32; // padding
-
-                        // If tentative would hide the info section, expand to required size
-                        double finalHeight = tentative;
-                        if (this.ActualHeight < requiredClient || tentative < requiredClient)
-                        {
-                            finalHeight = Math.Min(GetCurrentWorkAreaHeight(), Math.Max(requiredClient, this.MinHeight));
-                        }
-
-                        this.Height = finalHeight;
-                    }
-                    catch { /* best-effort sizing; ignore errors */ }
-                }), System.Windows.Threading.DispatcherPriority.Loaded);
-            }
-            else // EXPAND: show content and restore previous height if available
-            {
-                CollapsibleMainContent.Visibility = Visibility.Visible;
-
-                // Allow layout to update so sizes are correct, then restore height (prefer saved height)
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    this.UpdateLayout();
-                    if (!double.IsNaN(_savedWindowHeightForCompact) && _savedWindowHeightForCompact > 0)
-                    {
-                        // Clamp to work area
-                        this.Height = Math.Min(_savedWindowHeightForCompact, GetCurrentWorkAreaHeight());
-                        _savedWindowHeightForCompact = double.NaN;
-                    }
-                    else
-                    {
-                        // If no saved height, ensure window is tall enough to show content
-                        CollapsibleMainContent.Measure(new System.Windows.Size(this.ActualWidth, double.PositiveInfinity));
-                        double desired = this.ActualHeight + CollapsibleMainContent.DesiredSize.Height;
-                        this.Height = Math.Min(Math.Max(this.MinHeight, desired), GetCurrentWorkAreaHeight());
-                    }
-                }), System.Windows.Threading.DispatcherPriority.Loaded);
-            }
-
-            if (compactToggleIcon != null)
-                compactToggleIcon.Text = _isCompactView ? "▸" : "▾";
-
-            if (compactToggleButton != null)
-                compactToggleButton.ToolTip = LocalizationManager.Instance.Strings[_isCompactView ? "Btn_Compact_Show" : "Btn_Compact_Hide"];
-        }
-
-        private void CompactToggleButton_Click(object sender, RoutedEventArgs e)
-        {
-            // Toggle UI and update state
-            SetCompactView(!_isCompactView);
-
-            // (Optional) persist preference later via ConfigManager
-            // ConfigManager.Instance.SetValue("mainwindow_compact", _isCompactView.ToString());
+            // Respect the Windows animation preference; keep the layout still.
+            if (!SystemParameters.ClientAreaAnimation) return;
+            BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(150)));
         }
 
         private void SelectWindowButton_Click(object sender, RoutedEventArgs e)
         {
-            if (isCapturingWindow)
+            WindowSelectorPopup popup = new WindowSelectorPopup { Owner = this };
+            popup.WindowSelected += (handle, title) => OnWindowSelected(handle, title, showConfirmation: false);
+            popup.ShowDialog();
+        }
+
+        private void OptionsButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is System.Windows.Controls.Button button && button.ContextMenu != null)
             {
-                StopWindowCapture(windowLost: false);
-                Console.WriteLine("Window capture mode disabled");
+                button.ContextMenu.PlacementTarget = button;
+                button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+                button.ContextMenu.IsOpen = true;
+            }
+        }
+
+        private void ClearCapture_Click(object sender, RoutedEventArgs e)
+        {
+            if (isStarted) OnStartButtonToggleClicked(toggleButton, e);
+            if (isCapturingWindow) StopWindowCapture(windowLost: false);
+            btnClearSelectionArea_Click(sender, e);
+        }
+
+        private void RefreshWorkflowSummary()
+        {
+            if (CaptureSummaryText == null || WorkflowStatusText == null) return;
+            var strings = LocalizationManager.Instance;
+            bool hasWindow = isCapturingWindow && capturedWindowHandle != IntPtr.Zero;
+            bool hasCapture = hasSelectedTranslationArea || hasWindow;
+            if (hasSelectedTranslationArea)
+            {
+                CaptureSummaryText.Text = hasWindow
+                    ? string.Format(strings["Main_CaptureWindowArea"], capturedWindowTitle, currentAreaIndex + 1,
+                        (int)selectedTranslationArea.Width, (int)selectedTranslationArea.Height)
+                    : string.Format(strings["Main_CaptureArea"], currentAreaIndex + 1,
+                        (int)selectedTranslationArea.Width, (int)selectedTranslationArea.Height);
             }
             else
             {
-                WindowSelectorPopup popup = new WindowSelectorPopup { Owner = this };
-                popup.WindowSelected += (handle, title) => OnWindowSelected(handle, title);
-                popup.ShowDialog();
+                CaptureSummaryText.Text = hasWindow
+                    ? string.Format(strings["Main_CaptureWindow"], capturedWindowTitle)
+                    : strings["Main_NoCapture"];
             }
+            btnClearSelectionArea.Visibility = hasCapture ? Visibility.Visible : Visibility.Collapsed;
+            showAreaButton.Visibility = hasSelectedTranslationArea ? Visibility.Visible : Visibility.Collapsed;
+            WorkflowStatusText.Text = strings[isStarted ? "Main_Running" : hasCapture ? "Main_Ready" : "Main_Waiting"];
+        }
+
+        private static void SetResultButtonState(System.Windows.Controls.Button button, bool active)
+        {
+            button.SetResourceReference(Control.BackgroundProperty, active ? "Surface2Brush" : "SurfaceBrush");
+            button.SetResourceReference(Control.BorderBrushProperty, active ? "AccentBrush" : "BorderBrush");
+            button.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
         }
 
         public bool IsWindows10 => Windows_Version == "Windows 10";
@@ -3142,8 +2914,10 @@ namespace AlpWareStudio.Localay
             {
                 selectWindowButton.SetBinding(ContentControl.ContentProperty,
                     new System.Windows.Data.Binding("Strings[Btn_SelectWindow]") { Source = LocalizationManager.Instance });
-                selectWindowButton.Background = new SolidColorBrush(Color.FromRgb(69, 107, 160)); // Blue
+                selectWindowButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
+                if (isStarted && !hasSelectedTranslationArea) OnStartButtonToggleClicked(toggleButton, new RoutedEventArgs());
                 UpdateCaptureRect();
+                RefreshWorkflowSummary();
                 if (!IsWindows10)
                 {
                     MonitorWindow.Instance.EnableExcludeFromCapture();
@@ -3279,16 +3053,19 @@ namespace AlpWareStudio.Localay
                         MonitorWindow.Instance.EnableExcludeFromCapture();
                 }
 
-                selectWindowButton.Content = $"Window: {(capturedWindowTitle.Length > 10 ? capturedWindowTitle.Substring(0, 10) + "..." : capturedWindowTitle)}";
-                selectWindowButton.Background = new SolidColorBrush(Color.FromRgb(220, 0, 0)); // Red
+                selectWindowButton.SetBinding(ContentControl.ContentProperty,
+                    new System.Windows.Data.Binding("Strings[Main_ChangeApplication]") { Source = LocalizationManager.Instance });
+                RefreshWorkflowSummary();
+                CoachMarkTour.Current?.OnCaptureChosen();
+                selectWindowButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
 
                 Console.WriteLine($"Selected window: {capturedWindowTitle} (Handle: {capturedWindowHandle})");
 
                 if (showConfirmation)
                 {
                     System.Windows.MessageBox.Show(
-                        $"Now capturing window: {capturedWindowTitle}",
-                        "Window Selected",
+                        UiText.Format("Msg_WindowSelected", capturedWindowTitle),
+                        UiText.Get("Title_WindowSelected"),
                         MessageBoxButton.OK,
                         MessageBoxImage.Information);
                 }
@@ -3330,20 +3107,24 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void TutorialLink_RequestNavigate(object sender, System.Windows.Navigation.RequestNavigateEventArgs e)
+        private void AboutButton_Click(object sender, RoutedEventArgs e)
         {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = e.Uri.AbsoluteUri,
-                UseShellExecute = true
-            });
-            e.Handled = true;
+            var about = new AboutWindow { Owner = this };
+            about.ShowDialog();
+        }
+
+        private void ReleasesButton_Click(object sender, RoutedEventArgs e)
+        {
+            try { AppRelease.OpenReleases(); }
+            catch (Exception ex) { System.Windows.MessageBox.Show(UiText.Format("Msg_UnexpectedError", ex.Message), "Localay"); }
         }
 
         private void QuickStartButton_Click(object sender, RoutedEventArgs e)
         {
-            ShowWelcomeWindow();
+            OpenQuickStart();
         }
+
+        internal void OpenQuickStart() => ShowWelcomeWindow();
 
         // Factory reset of every setting (API keys and the interface language are kept), then a restart:
         // too much state is read once at startup to apply the defaults in place
@@ -3403,16 +3184,6 @@ namespace AlpWareStudio.Localay
             return true;
         }
 
-        private void DonateButton_Click(object sender, RoutedEventArgs e)
-        {
-            // Open donation link in default browser. Change URL to your actual donation page if needed.
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = "https://buymeacoffee.com/thanhkeke97",
-                UseShellExecute = true
-            });
-        }
-
         private void CheckAndShowWelcome()
         {
             _welcomePending = false;
@@ -3443,92 +3214,53 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void DiscordButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Open browser and go to discord
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "https://discord.gg/FusrDU5tdn",
-                    UseShellExecute = true
-                });
-                Console.WriteLine("Opening Discord invite link");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error opening Discord link: {ex.Message}");
+        private bool _syncingInterfacePreferences;
 
-                // Show error message
-                System.Windows.MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_CannotOpenDiscordLink"], ex.Message),
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error);
-            }
-        }
+        private void ThemeToggleButton_Click(object sender, RoutedEventArgs e) =>
+            ApplyThemePreference(PreferenceRules.NextThemeMode(ApplicationPreferences.ThemePreference));
 
-        private void ThemeToggleButton_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                bool enableDarkMode = !ConfigManager.Instance.IsDarkModeEnabled();
-                ConfigManager.Instance.SetDarkModeEnabled(enableDarkMode);
-                ThemeManager.ApplyTheme(enableDarkMode);
-                UpdateThemeToggleButtonUI();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error toggling theme: {ex.Message}");
-            }
-        }
+        internal void ApplyThemePreference(string mode) => ApplicationPreferences.SetThemePreference(mode);
 
         private void UpdateThemeToggleButtonUI()
         {
-            try
+            if (themeToggleIcon == null || themeToggleButton == null) return;
+            string mode = ApplicationPreferences.ThemePreference;
+            themeToggleIcon.Text = mode switch { "light" => "☀", "dark" => "☾", _ => "◐" };
+            string label = LocalizationManager.Instance[mode switch
             {
-                if (themeToggleIcon == null || themeToggleButton == null)
-                {
-                    return;
-                }
-
-                bool isDarkMode = ConfigManager.Instance.IsDarkModeEnabled();
-                themeToggleIcon.Text = isDarkMode ? "☀" : "🌙";
-                themeToggleButton.ToolTip = isDarkMode ? "Switch to Light Mode" : "Switch to Dark Mode";
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating theme toggle UI: {ex.Message}");
-            }
+                "light" => "Settings_Light", "dark" => "Settings_Dark", _ => "Preference_ThemeSystem"
+            }];
+            themeToggleButton.ToolTip = string.Format(LocalizationManager.Instance["Preference_ThemeHint"], label);
         }
 
-        // private bool isListening = false;
+        private void SyncInterfacePreferences()
+        {
+            _syncingInterfacePreferences = true;
+            try { InterfaceLanguageOptions.SelectPreference(languageSelector, ApplicationPreferences.LanguagePreference); }
+            finally { _syncingInterfacePreferences = false; }
+        }
+
         private void LanguageSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (languageSelector.SelectedItem is ComboBoxItem selectedItem && selectedItem.Tag is string languageCode)
+            if (_syncingInterfacePreferences || _isInitializing) return;
+            if (languageSelector.SelectedItem is ComboBoxItem { Tag: string language })
+                ApplicationPreferences.SetLanguagePreference(language);
+        }
+
+        private void ApplicationPreferences_Changed(object? sender, EventArgs e)
+        {
+            SyncInterfacePreferences();
+            AppVersion.Text = LocalizationManager.Instance["App_Version"] + " " + AppRelease.Version;
+            if (!_isInitializing)
             {
-                LocalizationManager.Instance.CurrentLanguage = languageCode;
-                ConfigManager.Instance.SetLanguageInterface(languageCode);
-                // status OCR
-                string savedOcrMethod = ConfigManager.Instance.GetOcrMethod();
-                if(savedOcrMethod == "Windows OCR" || savedOcrMethod == "OneOCR")
-                {
-                    OCRStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(20, 180, 20)); // Green
-                    OCRStatusText.Text = LocalizationManager.Instance.Strings["Btn_On"];
-                }
-                else
-                {
-                    OCRStatusEllipse.Fill = new SolidColorBrush(Color.FromRgb(239, 68, 68)); // Red
-                    OCRStatusText.Text = LocalizationManager.Instance.Strings["Btn_Off"];
-                }
-                AppVersion.Text = LocalizationManager.Instance.Strings["App_Version"] + " " + SplashManager.FormatVersion(SplashManager.CurrentVersion);
-
-                // Reload screen list to update localized text
                 LoadScreenList();
-
-                // Refresh dark/light toggle tooltip if language changed
-                UpdateThemeToggleButtonUI();
+                var strings = LocalizationManager.Instance;
+                StartStatusText.Text = strings[isStarted ? "Btn_On" : "Btn_Off"];
+                OverlayStatusText.Text = strings[IsOverlayShown ? "Btn_On" : "Btn_Off"];
+                OCRStatusText.Text = strings[ConfigManager.Instance.GetOcrMethod() is "Windows OCR" or "OneOCR" ? "Btn_On" : "Btn_Off"];
             }
+            RefreshWorkflowSummary();
+            UpdateThemeToggleButtonUI();
         }
 
         private void TrayStartStop_Click(object sender, RoutedEventArgs e)
@@ -3632,7 +3364,7 @@ namespace AlpWareStudio.Localay
                 // Perform translation
                 string? translatedText = await Logic.Instance.TranslateTextImmediateAsync(text);
 
-                Console.WriteLine($"[ClipboardTranslate] TranslateTextImmediateAsync returned: {(translatedText != null ? $"'{translatedText.Substring(0, Math.Min(50, translatedText.Length))}...'" : "null")}");
+                LogManager.Instance.WriteContentLine($"[ClipboardTranslate] TranslateTextImmediateAsync returned: {(translatedText != null ? $"'{translatedText.Substring(0, Math.Min(50, translatedText.Length))}...'" : "null")}");
 
                 if (!string.IsNullOrWhiteSpace(translatedText))
                 {

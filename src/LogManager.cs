@@ -1,170 +1,64 @@
-﻿using System.IO;
-using System.Text;
+using System.IO;
 using System.Text.Json;
 
-namespace AlpWareStudio.Localay
+namespace AlpWareStudio.Localay;
+
+public sealed class LogManager
 {
-    public class LogManager
+    private static readonly Lazy<LogManager> _instance = new(() => new LogManager());
+    public static LogManager Instance => _instance.Value;
+    private readonly object _fileLock = new();
+    private bool _contentDiagnosticsEnabled;
+    private readonly string _contentDirectory = Path.Combine(AppPaths.LogDirectory, "Content");
+
+    private LogManager()
     {
-        private static LogManager? _instance;
-        private readonly string _logDirectory;
-        private readonly object _fileLock = new object(); // Thread-safe file access
-        
-        // Log file paths
-        private readonly string _ocrResponsePath;
-        private readonly string _llmRequestPath;
-        private readonly string _llmReplyPath;
-        
-        // Singleton pattern
-        public static LogManager Instance
+        // Consent lasts for one process only. Do not retain previous-session content diagnostics.
+        try { if (Directory.Exists(_contentDirectory)) Directory.Delete(_contentDirectory, true); }
+        catch (IOException) { Console.WriteLine("Previous diagnostics could not be removed; review the Localay log folder before sharing."); }
+        catch (UnauthorizedAccessException) { Console.WriteLine("Previous diagnostics could not be removed; review the Localay log folder before sharing."); }
+    }
+
+    public bool ContentDiagnosticsEnabled { get { lock (_fileLock) return _contentDiagnosticsEnabled; } }
+
+    public void SetContentDiagnostics(bool enabled)
+    {
+        lock (_fileLock)
         {
-            get
-            {
-                if (_instance == null)
-                {
-                    _instance = new LogManager();
-                }
-                return _instance;
-            }
-        }
-        
-        // Constructor
-        private LogManager()
-        {
-            // Set log directory to be in the application's directory
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            _logDirectory = appDirectory;
-            
-            // Set log file paths
-            _ocrResponsePath = Path.Combine(_logDirectory, "last_ocr_response.json");
-            _llmRequestPath = Path.Combine(_logDirectory, "last_llm_request_sent.txt");
-            _llmReplyPath = Path.Combine(_logDirectory, "last_llm_reply_received.txt");
-            
-            Console.WriteLine($"Log files will be saved in: {_logDirectory}");
-        }
-        
-        public void LogOcrResponse(string jsonData)
-        {
-            // Fire-and-forget to avoid blocking
-            Task.Run(() =>
-            {
-                lock (_fileLock)
-                {
-                    try
-                    {
-                        // Attempt to format the JSON for better readability
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(jsonData);
-                            var options = new JsonSerializerOptions 
-                            { 
-                                WriteIndented = true,
-                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping 
-                            };
-                            jsonData = JsonSerializer.Serialize(doc.RootElement, options);
-                        }
-                        catch
-                        {
-                            // If formatting fails, use the original JSON
-                        }
-                        
-                        // Write to file
-                        File.WriteAllText(_ocrResponsePath, jsonData);
-                        //Console.WriteLine($"OCR response logged to {_ocrResponsePath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        // Use debug output to avoid potential deadlock with Console.WriteLine
-                        System.Diagnostics.Debug.WriteLine($"Error logging OCR response: {ex.Message}");
-                    }
-                }
-            });
-        }
-        
-        // Log LLM request (thread-safe, non-blocking)
-        public void LogLlmRequest(string prompt, string jsonData)
-        {
-            // Fire-and-forget to avoid blocking
-            Task.Run(() =>
-            {
-                lock (_fileLock)
-                {
-                    try
-                    {
-                        // Combine prompt and JSON data
-                        StringBuilder sb = new StringBuilder();
-                        sb.AppendLine("=== LLM PROMPT ===");
-                        sb.AppendLine(prompt);
-                        sb.AppendLine();
-                        sb.AppendLine("=== INPUT JSON ===");
-                        
-                        // Attempt to format the JSON for better readability
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(jsonData);
-                            var options = new JsonSerializerOptions 
-                            { 
-                                WriteIndented = true,
-                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping 
-                            };
-                            sb.AppendLine(JsonSerializer.Serialize(doc.RootElement, options));
-                        }
-                        catch
-                        {
-                            // If formatting fails, use the original JSON
-                            sb.AppendLine(jsonData);
-                        }
-                        
-                        // Write to file
-                        File.WriteAllText(_llmRequestPath, sb.ToString());
-                        Console.WriteLine($"LLM request logged to {_llmRequestPath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        // Use debug output to avoid potential deadlock with Console.WriteLine
-                        System.Diagnostics.Debug.WriteLine($"Error logging LLM request: {ex.Message}");
-                    }
-                }
-            });
-        }
-        
-        // Log LLM reply (thread-safe, non-blocking)
-        public void LogLlmReply(string jsonResponse)
-        {
-            // Fire-and-forget to avoid blocking
-            Task.Run(() =>
-            {
-                lock (_fileLock)
-                {
-                    try
-                    {
-                        // Attempt to format the JSON for better readability
-                        try
-                        {
-                            using JsonDocument doc = JsonDocument.Parse(jsonResponse);
-                            var options = new JsonSerializerOptions 
-                            { 
-                                WriteIndented = true,
-                                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping 
-                            };
-                            jsonResponse = JsonSerializer.Serialize(doc.RootElement, options);
-                        }
-                        catch
-                        {
-                            // If formatting fails, use the original JSON
-                        }
-                        
-                        // Write to file
-                        File.WriteAllText(_llmReplyPath, jsonResponse);
-                        Console.WriteLine($"LLM reply logged to {_llmReplyPath}");
-                    }
-                    catch (Exception ex)
-                    {
-                        // Use debug output to avoid potential deadlock with Console.WriteLine
-                        System.Diagnostics.Debug.WriteLine($"Error logging LLM reply: {ex.Message}");
-                    }
-                }
-            });
+            if (enabled) Directory.CreateDirectory(_contentDirectory);
+            _contentDiagnosticsEnabled = enabled;
+            if (!enabled && Directory.Exists(_contentDirectory)) Directory.Delete(_contentDirectory, true);
         }
     }
+
+    public void WriteContentLine(string message)
+    {
+        lock (_fileLock)
+        {
+            if (_contentDiagnosticsEnabled) Console.WriteLine(CredentialRedactor.Redact(message));
+        }
+    }
+
+    public void WriteDiagnostic(string fileName, string content)
+    {
+        lock (_fileLock)
+        {
+            if (!_contentDiagnosticsEnabled) return;
+            if (fileName != Path.GetFileName(fileName)) throw new ArgumentException("A diagnostic file name is required.");
+            try
+            {
+                string safe = CredentialRedactor.Redact(content);
+                // Keep a bounded last-response snapshot rather than an unbounded history.
+                if (safe.Length > 1_000_000) safe = safe[..1_000_000];
+                AppPaths.WriteAtomic(Path.Combine(_contentDirectory, fileName), safe);
+            }
+            catch (IOException) { System.Diagnostics.Debug.WriteLine("Could not save content diagnostics."); }
+            catch (UnauthorizedAccessException) { System.Diagnostics.Debug.WriteLine("Could not save content diagnostics."); }
+        }
+    }
+
+    public void LogOcrResponse(string jsonData) => WriteDiagnostic("last_ocr_response.json", jsonData);
+    public void LogLlmRequest(string prompt, string jsonData) =>
+        WriteDiagnostic("last_llm_request_sent.txt", prompt + Environment.NewLine + jsonData);
+    public void LogLlmReply(string jsonResponse) => WriteDiagnostic("last_llm_reply_received.txt", jsonResponse);
 }

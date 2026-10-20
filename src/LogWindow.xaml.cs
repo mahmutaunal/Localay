@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -53,6 +53,23 @@ namespace AlpWareStudio.Localay
             initializeLogCapture();
         }
         
+        private void ContentDiagnostics_Changed(object sender, RoutedEventArgs e)
+        {
+            bool enabled = contentDiagnosticsCheckBox.IsChecked == true;
+            if (enabled && System.Windows.MessageBox.Show(LocalizationManager.Instance["Msg_ContentDiagnostics"],
+                "Localay", MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                contentDiagnosticsCheckBox.IsChecked = false;
+                return;
+            }
+            try { LogManager.Instance.SetContentDiagnostics(enabled); }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show(UiText.Format("Msg_UnexpectedError", ex.Message), "Localay");
+                if (enabled) contentDiagnosticsCheckBox.IsChecked = false;
+            }
+        }
+
         // Initialize console output capture
         private void initializeLogCapture()
         {
@@ -67,9 +84,7 @@ namespace AlpWareStudio.Localay
             Console.SetOut(multiWriter);
             
             // Write initial message
-            appendLog("=== Log Viewer Started ===");
-            appendLog("All application messages will appear here.");
-            appendLog("You can select and copy text freely.");
+            appendLog(UiText.Get("Log_Intro"));
             appendLog("==========================\n");
         }
         
@@ -152,10 +167,7 @@ namespace AlpWareStudio.Localay
         // Update line count display
         private void updateLineCount()
         {
-            lineCountText.Text = string.Format(
-                LocalizationManager.Instance.Strings["LogWindow_Status_Lines"],
-                _lineCount
-            );
+            UiText.Bind(lineCountText, TextBlock.TextProperty, "LogWindow_Status_Lines", _lineCount);
         }
         
         // Clear button click
@@ -166,7 +178,7 @@ namespace AlpWareStudio.Localay
             _logLines.Clear();
             _lineCount = 0;
             updateLineCount();
-            statusText.Text = "Log cleared";
+            UiText.Bind(statusText, TextBlock.TextProperty, "Log_Cleared");
         }
         
         // Copy all button click
@@ -177,16 +189,16 @@ namespace AlpWareStudio.Localay
                 if (!string.IsNullOrEmpty(logTextBox.Text))
                 {
                     System.Windows.Clipboard.SetText(logTextBox.Text);
-                    statusText.Text = "All log text copied to clipboard";
+                    UiText.Bind(statusText, TextBlock.TextProperty, "Log_Copied");
                 }
                 else
                 {
-                    statusText.Text = "No log text to copy";
+                    UiText.Bind(statusText, TextBlock.TextProperty, "Log_Empty");
                 }
             }
             catch (Exception ex)
             {
-                statusText.Text = $"Error copying to clipboard: {ex.Message}";
+                UiText.Bind(statusText, TextBlock.TextProperty, "Msg_CopyFailed", ex.Message);
             }
         }
         

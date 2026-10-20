@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -235,7 +235,7 @@ namespace AlpWareStudio.Localay
                         outputJson.WriteString("translated_text", translated);
                         outputJson.WriteEndObject();
 
-                        Console.WriteLine($"Microsoft translated: '{originalText}' -> '{translated}'");
+                        LogManager.Instance.WriteContentLine($"Microsoft translated: '{originalText}' -> '{translated}'");
                     }
                 }
 
@@ -251,7 +251,7 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Error in MicrosoftLegacyTranslationService: {ex.Message}");
                 try
                 {
-                    File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), ex.ToString());
+                    LogManager.Instance.WriteDiagnostic("microsoft_last_error.txt", ex.ToString());
                 }
                 catch { }
                 return null;
@@ -358,7 +358,7 @@ namespace AlpWareStudio.Localay
             catch (Exception exSend)
             {
                 string debug = $"Exception sending request after retries: {exSend}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}";
-                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_request.txt"), debug); } catch { }
+                try { LogManager.Instance.WriteDiagnostic("microsoft_last_request.txt", debug); } catch { }
                 Console.WriteLine($"Microsoft translator request failed: {exSend.Message}");
                 return null;
             }
@@ -368,8 +368,8 @@ namespace AlpWareStudio.Localay
                 string err = await response.Content.ReadAsStringAsync();
                 string debug = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}\nResponse: {err}";
 
-                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), err); } catch { }
-                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_request.txt"), debug); } catch { }
+                try { LogManager.Instance.WriteDiagnostic("microsoft_last_error.txt", err); } catch { }
+                try { LogManager.Instance.WriteDiagnostic("microsoft_last_request.txt", debug); } catch { }
 
                 Console.WriteLine($"Microsoft translator HTTP error: {response.StatusCode}");
                 return null;
@@ -398,7 +398,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error parsing Microsoft response: {ex.Message}");
-                try { File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "microsoft_last_error.txt"), jsonResponse); } catch { }
+                try { LogManager.Instance.WriteDiagnostic("microsoft_last_error.txt", jsonResponse); } catch { }
                 return null;
             }
         }

@@ -1,59 +1,137 @@
-# Localay
+<p align="center">
+  <img src="assets/logo.png" alt="Localay logo" width="112">
+</p>
 
-**Real-time game localization for Windows** — an open-source AlpWare Studio project.
+<h1 align="center">Localay</h1>
 
-Localay captures a game window through Windows Graphics Capture, detects visible text, translates it, and renders the result as an overlay. The goal is to make subtitles, menus, tutorials, quests, item descriptions and other readable UI text understandable without modifying game files or injecting code into the game process.
+<p align="center">
+  Real-time game localization for Windows.<br>
+  An open-source project by <a href="https://www.alpwarestudio.com/en/products/">AlpWare Studio</a>.
+</p>
 
-## Design goals
+<p align="center">
+  <a href="https://github.com/mahmutaunal/Localay/releases">Downloads</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#build-from-source">Build from source</a> ·
+  <a href="https://github.com/mahmutaunal/Localay/issues">Report an issue</a>
+</p>
 
-- Windows-first and game-focused.
-- Zero monetary cost for normal use.
-- Low overhead: frame-change detection, translation caching and bounded real-time processing avoid unnecessary work.
-- No DLL injection, memory patching or game-file modification.
-- English → Turkish defaults, while the inherited language/provider system remains available.
-- In-place presentation where supported: OCR bounding boxes, block detection and text erasing are used to keep translated text close to the original UI.
+Localay captures text from a game window or a selected screen area, recognizes it with OCR, and translates it into your chosen language. Read the result over the game or in a separate ChatBox window—without modifying game files or injecting code into the game process.
+
+![Localay English interface preview](assets/en.png)
+
+*Representative preview of the English interface in light theme; not an actual Windows screenshot.*
+
+## Features
+
+- **Translate visible game text:** subtitles, dialogue, menus, quests, tutorials, and item descriptions.
+- **Choose your capture area:** select an application window or a specific screen region.
+- **Read your way:** display translations in an overlay or a separate ChatBox.
+- **Choose your languages:** English → Turkish is the default; source and target languages can be changed.
+- **Follow your system preferences:** automatic interface language and theme selection, with manual overrides in Settings.
+- **Use cloud or local translation:** start with the default provider or configure a locally hosted model.
+- **Keep controls within reach:** configurable shortcuts, reusable profiles, and optional clipboard translation.
+- **Reduce repeated work:** frame-change detection and translation caching limit unnecessary processing.
+
+## Requirements
+
+- Windows 10 version 2004 (build 19041) or newer; Windows 11 recommended.
+- An x64 PC.
+- The Windows OCR language feature for the language you want to recognize.
+- An internet connection for online translation, or a configured local translation service and model for offline use.
+
+Published builds include the .NET runtime. You do not need to install .NET separately to run Localay. Available recognition and translation languages depend on the OCR engine and translation provider.
+
+## Installation
+
+### Windows installer
+
+Download `Localay-<version>-Setup-x64.exe` from the latest release on [GitHub Releases](https://github.com/mahmutaunal/Localay/releases), then run it to install Localay.
+
+The short setup installs Localay for the current user without requesting administrator privileges. It adds a Start menu shortcut and offers an optional desktop shortcut. You can uninstall it through Windows Settings; user settings and credentials are retained.
+
+To get a build directly from GitHub Actions:
+
+1. Open **Actions → Build Windows Installer** in the [GitHub repository](https://github.com/mahmutaunal/Localay/actions) and select a successful run.
+2. Download the **Localay-Setup-windows-x64** artifact.
+3. Extract the downloaded archive, then run the setup EXE inside it.
+
+See the [installer guide](installer/README.md) for artifact contents, checksums, and installation validation.
+
+### Portable version
+
+The **Localay-Portable-windows-x64** Actions artifact contains the portable package. Extract the package into a folder and launch `Localay.exe`. Keep all included files together.
 
 ## Quick start
 
-### Requirements
+1. **Choose your languages.** Set **Source Language** to the language visible in the game and **Target Language** to the language you want to read. Source language selection is manual.
+2. **Choose what to capture.** Use **Select Application** for a game window, or **Select Area** for a specific screen region.
+3. **Start translating.** Choose **Overlay** or **ChatBox**, then start translation from the main window.
 
-- Windows 10 2004 (build 19041) or newer; Windows 11 recommended.
-- x64 PC.
-- .NET 9 SDK only when building from source. Published self-contained builds do not require a separate .NET installation.
+Use **More → Settings** to change the translation provider, interface language, theme, capture behavior, and shortcuts. On Windows 10, overlay mode requires a selected application window.
 
-### Build
+OCR accuracy depends on text size, contrast, font, and animation. Compatibility can also vary with HDR, exclusive fullscreen, and game protection policies. Try borderless or windowed mode if capture or overlays do not work as expected.
+
+## Translation providers
+
+| Option | Setup | Connection and cost |
+| --- | --- | --- |
+| Google Translate web mode (default) | No API key required | Internet required; subject to service availability and limits. |
+| Cloud API providers | Configure the provider and your credentials in Settings | Internet required; provider pricing and usage limits apply. |
+| Ollama or LM Studio | Install a model and configure the local service | Can work offline once the model is installed; hardware requirements depend on the model. |
+
+Localay does not require a paid translation subscription. Optional API services may charge for usage. Local models use your PC's resources and may need additional RAM or GPU memory.
+
+## Privacy and security
+
+Screen capture and OCR run on your PC. When you choose an online translation provider, recognized text and configured context are sent to that provider. Use Ollama or LM Studio with a locally hosted model to keep translation local.
+
+- Clipboard translation is disabled by default and requires consent.
+- Logging translation content requires a separate opt-in for each session.
+- Settings are stored in `%LOCALAPPDATA%\AlpWare Studio\Localay`.
+- API keys are protected for the current Windows user and excluded from shared profiles.
+
+Localay is currently distributed without code signing. Windows SmartScreen, Smart App Control, antivirus software, or organizational policies may warn about or block an unsigned build. Release validation includes Microsoft Defender scanning, but a clean scan cannot guarantee that every security product will accept the executable. See [SECURITY.md](SECURITY.md) for release checks and false-positive reporting.
+
+### Updates
+
+Localay does not automatically download or replace executables. Close the app and run the newer installer to update it while preserving settings. For portable installations, extract the new package into a clean folder.
+
+## Build from source
+
+Use the .NET SDK selected by [global.json](global.json). PowerShell 7 is required for the validation and packaging scripts. Windows is required to run the application and validate the installer.
 
 ```powershell
-dotnet restore .\Localay.csproj
-dotnet build .\Localay.csproj -c Release
+dotnet restore ./Localay.csproj -r win-x64 --locked-mode
+dotnet build ./Localay.csproj -c Release -r win-x64 --no-restore
 ```
 
-### Publish
+Run the project checks from PowerShell 7:
 
 ```powershell
-./Publish-Windows.ps1
+./Verify-Project.ps1
 ```
 
-The verified portable output is written to `artifacts/publish`; Release build output is isolated in `bin/Release`. Language files and OneOCR assets are copied into both outputs.
+For setup and portable packages, use the **Build Windows Installer** GitHub Actions workflow. You can trigger it from a Mac through **Actions → Build Windows Installer → Run workflow**. The workflow builds on Windows and validates the packages before uploading artifacts.
 
-The project intentionally keeps the proven RSTGameTranslation WPF/Direct3D capture and overlay architecture instead of rewriting the UI. Localay defaults to English source text and Turkish output.
+See [BUILD.md](BUILD.md) for local build, publishing, and validation instructions, and the [installer guide](installer/README.md) for packaging details.
 
-## Translation modes and cost
+## Contributing
 
-The default provider is the no-key Google Translate web mode inherited from RSTGameTranslation, so Localay is usable without paid API credentials. It requires internet access. For fully local/offline translation, the inherited **Ollama** and **LM Studio** providers can be used with a locally installed model; this has no per-request cost but uses more RAM/CPU/GPU depending on the model.
+Bug reports and focused improvements are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
 
-Localay does not claim that every game or every stylized font can be localized perfectly. OCR accuracy, overlays, exclusive fullscreen modes, anti-cheat policies, HDR and animated UI can vary by game. Borderless/windowed mode is recommended when a game blocks overlays.
+For bugs, open an [issue](https://github.com/mahmutaunal/Localay/issues) with your Windows version, Localay version, selected OCR and translation providers, and steps to reproduce the problem. Remove API keys and private content from logs or screenshots. Follow [SECURITY.md](SECURITY.md) for security-related reports.
 
-## Performance notes
+## License and acknowledgments
 
-Localay inherits and preserves the performance-oriented parts of the upstream engine, including Windows Graphics Capture/Direct3D 11 capture, frame-change detection, translation caching, OCR timing controls, spatial block detection and stale-result protections. The speech recognition and TTS stack is removed from Localay: Whisper, CUDA/Vulkan speech runtimes, Sherpa, NAudio, System.Speech and the speech-only ONNX runtime are not shipped. The OCR, translation, capture and overlay UI is retained; retired speech controls are removed.
+Localay is licensed under [GNU GPL v3.0](LICENSE.md) and is derived from **RSTGameTranslation** by Thanh Pham. Original attribution and license notices are preserved.
 
-## Privacy
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependencies and acknowledgments. License information is also available offline in **More → About Localay → Licenses and contributors**.
 
-Screen processing happens on the local PC. Text is sent to a network service only when a network translation provider is selected. Ollama/LM Studio modes keep translation local.
+## AlpWare Studio
 
-## Open source and attribution
+Developed by **AlpWare Studio**.
 
-Localay is a GPL-3.0 derivative of **RSTGameTranslation**. The original GPL license and attribution are preserved. DeskTranslate and OCR Overlay were reviewed as architectural references; their source trees are not bundled into this repository.
-
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for details.
+- [Explore our other projects](https://www.alpwarestudio.com/en/products/)
+- [Source code on GitHub](https://github.com/mahmutaunal/Localay)
+- [contact@alpwarestudio.com](mailto:contact@alpwarestudio.com)

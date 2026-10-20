@@ -1,3 +1,4 @@
+using MenuItem = System.Windows.Controls.MenuItem;
 using System;
 using System.Windows;
 using System.Windows.Controls;
@@ -9,6 +10,7 @@ using System.Runtime.CompilerServices;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using ContextMenu = System.Windows.Controls.ContextMenu;
 using Color = System.Windows.Media.Color;
 using Cursors = System.Windows.Input.Cursors;
 using Clipboard = System.Windows.Forms.Clipboard;
@@ -80,7 +82,7 @@ namespace AlpWareStudio.Localay
 
         // Constructor with default parameters
         public TextObject(
-            string text = "New text added!",
+            string text = "",
             double x = 0,
             double y = 0,
             double width = 0,
@@ -493,13 +495,13 @@ namespace AlpWareStudio.Localay
 
             // Copy Source menu item
             MenuItem copySourceMenuItem = new MenuItem();
-            copySourceMenuItem.Header = "Copy Source";
+            UiText.Bind(copySourceMenuItem, MenuItem.HeaderProperty, "Menu_CopySource");
             copySourceMenuItem.Click += CopySourceMenuItem_Click;
             contextMenu.Items.Add(copySourceMenuItem);
 
             // Copy Translated menu item
             MenuItem copyTranslatedMenuItem = new MenuItem();
-            copyTranslatedMenuItem.Header = "Copy Translated";
+            UiText.Bind(copyTranslatedMenuItem, MenuItem.HeaderProperty, "Menu_CopyTranslated");
             copyTranslatedMenuItem.Click += CopyTranslatedMenuItem_Click;
             contextMenu.Items.Add(copyTranslatedMenuItem);
 
@@ -508,7 +510,7 @@ namespace AlpWareStudio.Localay
 
             // Learn Source menu item
             MenuItem learnSourceMenuItem = new MenuItem();
-            learnSourceMenuItem.Header = "Learn Source";
+            UiText.Bind(learnSourceMenuItem, MenuItem.HeaderProperty, "Menu_LearnSource");
             learnSourceMenuItem.Click += LearnSourceMenuItem_Click;
             contextMenu.Items.Add(learnSourceMenuItem);
 

@@ -129,6 +129,7 @@ namespace AlpWareStudio.Localay
 
         public ValueTask InitializeAsync()
         {
+            if (!NativeOcrAssets.IsAvailable) throw new InvalidOperationException("Verified OneOCR assets are unavailable. Select Windows OCR.");
             if (_initialized)
             {
                 return ValueTask.CompletedTask;

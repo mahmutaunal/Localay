@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -183,14 +183,14 @@ namespace AlpWareStudio.Localay
                     catch (JsonException jex)
                     {
                         Console.WriteLine($"Error parsing Ollama response: {jex.Message}");
-                        Console.WriteLine($"Raw response: {jsonResponse}");
+                        LogManager.Instance.WriteContentLine($"Raw response: {jsonResponse}");
                         return null;
                     }
                 }
                 else
                 {
                     string errorMessage = await response.Content.ReadAsStringAsync();
-                    Console.WriteLine($"Ollama API error: {response.StatusCode}, {errorMessage}");
+                    LogManager.Instance.WriteContentLine($"Ollama API error: {response.StatusCode}, {errorMessage}");
                     
                     // Try to parse the error message from JSON if possible
                     try

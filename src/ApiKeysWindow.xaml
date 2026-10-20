@@ -1,8 +1,8 @@
-﻿<Window x:Class="AlpWareStudio.Localay.ApiKeysWindow"
+<Window x:Class="AlpWareStudio.Localay.ApiKeysWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:AlpWareStudio.Localay"
-        Title="API Keys" Height="350" Width="450"
+        Title="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[ApiKeys_Title]}" Height="350" Width="450"
     Background="{DynamicResource SurfaceBrush}"
     Foreground="{DynamicResource TextBrush}"
         WindowStartupLocation="CenterOwner">
@@ -108,7 +108,7 @@
         <ListView x:Name="apiKeysListView" Grid.Row="0" Margin="0,0,0,10">
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="API Keys" Width="400" DisplayMemberBinding="{Binding}" />
+                    <GridViewColumn Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[ApiKeys_Title]}" Width="400" DisplayMemberBinding="{Binding}" />
                 </GridView>
             </ListView.View>
         </ListView>

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -24,7 +24,7 @@ namespace AlpWareStudio.Localay
         {
             InitializeComponent();
 
-            this.Title = LocalizationManager.Instance.Strings["SelectWindow_Title"];
+            UiText.Bind(this, Window.TitleProperty, "SelectWindow_Title");
             this.Width = 500;
             this.Height = 400;
             this.WindowStartupLocation = WindowStartupLocation.CenterScreen;
@@ -38,7 +38,7 @@ namespace AlpWareStudio.Localay
         {
             startupHintPanel.Visibility = Visibility.Visible;
             win10HintText.Visibility = isWindows10 ? Visibility.Visible : Visibility.Collapsed;
-            cancelButton.Content = LocalizationManager.Instance.Strings["Common_Btn_Skip"];
+            UiText.Bind(cancelButton, ContentControl.ContentProperty, "Common_Btn_Skip");
             this.Height = isWindows10 ? 480 : 440;
         }
 

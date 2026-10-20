@@ -1,3 +1,5 @@
+using ContextMenu = System.Windows.Controls.ContextMenu;
+using MenuItem = System.Windows.Controls.MenuItem;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -169,15 +171,18 @@ namespace AlpWareStudio.Localay
             ContextMenu contextMenu = new ContextMenu();
 
             // Add standard menu items
-            MenuItem cutItem = new MenuItem() { Header = "Cut" };
+            MenuItem cutItem = new MenuItem();
+            UiText.Bind(cutItem, MenuItem.HeaderProperty, "Menu_Cut");
             cutItem.Command = ApplicationCommands.Cut;
             contextMenu.Items.Add(cutItem);
 
-            MenuItem copyItem = new MenuItem() { Header = "Copy" };
+            MenuItem copyItem = new MenuItem();
+            UiText.Bind(copyItem, MenuItem.HeaderProperty, "Menu_Copy");
             copyItem.Command = ApplicationCommands.Copy;
             contextMenu.Items.Add(copyItem);
 
-            MenuItem pasteItem = new MenuItem() { Header = "Paste" };
+            MenuItem pasteItem = new MenuItem();
+            UiText.Bind(pasteItem, MenuItem.HeaderProperty, "Menu_Paste");
             pasteItem.Command = ApplicationCommands.Paste;
             contextMenu.Items.Add(pasteItem);
 
@@ -185,7 +190,8 @@ namespace AlpWareStudio.Localay
             contextMenu.Items.Add(new Separator());
 
             // Add Learn menu item
-            MenuItem learnItem = new MenuItem() { Header = "Learn" };
+            MenuItem learnItem = new MenuItem();
+            UiText.Bind(learnItem, MenuItem.HeaderProperty, "Menu_Learn");
             learnItem.Click += LearnMenuItem_Click;
             contextMenu.Items.Add(learnItem);
 
@@ -450,15 +456,15 @@ namespace AlpWareStudio.Localay
             {
                 if (_displayMode == 0)
                 {
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_BothTexts"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_BothTexts");
                 }
                 else if (_displayMode == 1)
                 {
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_TranslatedText"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_TranslatedText");
                 }
                 else if (_displayMode == 2)
                 {
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_OriginalText"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_OriginalText");
                 }
             }
 
@@ -959,13 +965,13 @@ namespace AlpWareStudio.Localay
                 if (bSettling && translationStatusText != null)
                 {
                     // If settling, show "Settling..." message
-                    translationStatusText.Text = "Settling...";
+                    UiText.Bind(translationStatusText, TextBlock.TextProperty, "Status_Settling");
                 }
                 else if (translationStatusText != null)
                 {
                     // If translating, show translation notification with service name
                     string service = ConfigManager.Instance.GetCurrentTranslationService();
-                    translationStatusText.Text = $"Waiting for {service}...";
+                    UiText.Bind(translationStatusText, TextBlock.TextProperty, "Status_WaitingService", service);
                 }
 
                 // Start animation timer in all cases
@@ -1051,17 +1057,17 @@ namespace AlpWareStudio.Localay
                 if (_displayMode == 0)
                 {
                     // Both
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_BothTexts"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_BothTexts");
                 }
                 else if (_displayMode == 1)
                 {
                     // Target only
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_TranslatedText"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_TranslatedText");
                 }
                 else if (_displayMode == 2)
                 {
                     // Source only
-                    modeButton.Content = LocalizationManager.Instance.Strings["ChatBox_Btn_Mode_OriginalText"];
+                    UiText.Bind(modeButton, ContentControl.ContentProperty, "ChatBox_Btn_Mode_OriginalText");
                 }
 
                 // Save display mode to config

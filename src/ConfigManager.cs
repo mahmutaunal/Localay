@@ -24,6 +24,7 @@ namespace AlpWareStudio.Localay
         public readonly string _funAsrModelFolderPath;
         public readonly string _supertonicModelFolderPath;
         private readonly Dictionary<string, string> _configValues;
+        private readonly Dictionary<string, string> _unreadableSecrets = new();
         private string _currentTranslationService = "Google Translate"; // Zero-cost default; offline providers remain optional
 
         // Parsed ignore phrases. Read by the OCR thread and replaced by the UI thread, so it is an
@@ -95,6 +96,7 @@ namespace AlpWareStudio.Localay
         public const string FORCE_CURSOR_VISIBLE = "force_cursor_visible";
         public const string AUTO_SIZE_TEXT_BLOCKS = "auto_size_text_blocks";
         public const string DARK_MODE = "dark_mode";
+        public const string THEME_MODE = "theme_mode";
         public const string GOOGLE_TRANSLATE_API_KEY = "google_translate_api_key";
         // Google Translate settings
         public const string GOOGLE_TRANSLATE_USE_CLOUD_API = "google_translate_use_cloud_api";
@@ -372,12 +374,12 @@ namespace AlpWareStudio.Localay
         }
 
         // Constructor
-        private ConfigManager()
+        internal ConfigManager(string? dataDirectory = null, string? legacyDirectory = null)
         {
             _configValues = new Dictionary<string, string>();
 
-            // Set config file paths to be in the application's directory
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string appDirectory = dataDirectory ?? AppPaths.DataDirectory;
+            AppPaths.MigrateLegacySettings(legacyDirectory ?? AppDomain.CurrentDomain.BaseDirectory, appDirectory);
             _configFilePath = Path.Combine(appDirectory, "config.txt");
             _audioProcessingModelFolderPath = Path.Combine(appDirectory, "AudioModel");
             _funAsrModelFolderPath = Path.Combine(appDirectory, "AudioModel", "FunASR");
@@ -407,6 +409,14 @@ namespace AlpWareStudio.Localay
 
             // Load main config values
             LoadConfig();
+            // Preserve existing explicit preferences; fresh/missing preferences follow Windows.
+            _configValues[THEME_MODE] = GetThemeMode();
+            _configValues.Remove(DARK_MODE);
+            _configValues[LANGUAGE_INTERFACE] = GetLanguageInterface();
+
+            Directory.CreateDirectory(_profileFolderPath);
+            // Upgrade existing plaintext settings after loading them into memory.
+            SaveConfig();
 
             // Load translation service from config
             if (_configValues.TryGetValue(TRANSLATION_SERVICE, out string? service))
@@ -464,6 +474,9 @@ namespace AlpWareStudio.Localay
                 SaveConfig();
             }
 
+            // Old versions enabled clipboard translation without the current privacy explanation.
+            if (!GetBoolValue("clipboard_privacy_consent_v1")) SetClipboardAutoTranslateEnabled(false);
+
             // Create service-specific config files if they don't exist
             EnsureServiceConfigFilesExist();
         }
@@ -494,12 +507,29 @@ namespace AlpWareStudio.Localay
                 {
                     // Read all content from the config file
                     string content = File.ReadAllText(filePath);
+                    bool isProfile = !string.Equals(Path.GetFullPath(filePath), _configFilePath,
+                        StringComparison.OrdinalIgnoreCase);
+                    if (isProfile) content = ConfigFileSecurity.RewriteSecrets(content, false);
 
                     // First, process multiline values with tags
                     ProcessMultilineValues(content);
 
                     // Then process regular single-line values
                     ProcessSingleLineValues(content);
+                    if (!isProfile)
+                    {
+                        foreach (string key in _configValues.Keys.Where(ConfigFileSecurity.IsSecret).ToArray())
+                        {
+                            string stored = _configValues[key];
+                            try { _configValues[key] = ConfigFileSecurity.Unprotect(stored); }
+                            catch (Exception ex) when (ex is System.Security.Cryptography.CryptographicException or FormatException)
+                            {
+                                _unreadableSecrets[key] = stored;
+                                _configValues[key] = "";
+                                Console.WriteLine("A saved credential could not be decrypted. Re-enter it in API settings.");
+                            }
+                        }
+                    }
                 }
 
                 // A profile may carry its own ignore phrases
@@ -508,7 +538,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error loading config: {ex.Message}");
-                MessageBox.Show($"Error loading configuration: {ex.Message}", "Configuration Error",
+                MessageBox.Show(UiText.Format("Msg_ConfigLoadError", ex.Message), UiText.Get("Title_ConfigError"),
                     MessageBoxButton.OK, MessageBoxImage.Warning);
             }
 
@@ -569,7 +599,7 @@ namespace AlpWareStudio.Localay
             _configValues[OLLAMA_PORT] = (11434).ToString(CultureInfo.InvariantCulture);
             _configValues[LM_STUDIO_URL] = "http://localhost";
             _configValues[LM_STUDIO_PORT] = (1234).ToString(CultureInfo.InvariantCulture);
-            _configValues[OCR_METHOD] = "OneOCR";
+            _configValues[OCR_METHOD] = "Windows OCR";
             _configValues[OLLAMA_MODEL] = "gemma3:12b";
             _configValues[OLLAMA_TEMPERATURE] = (0.1).ToString(CultureInfo.InvariantCulture);
             _configValues[OLLAMA_TOP_P] = (0.9).ToString(CultureInfo.InvariantCulture);
@@ -648,7 +678,8 @@ namespace AlpWareStudio.Localay
             _configValues[LANGUAGE_FONT_SIZE_MIN] = (10).ToString(CultureInfo.InvariantCulture);
             _configValues[LANGUAGE_FONT_SIZE_MAX] = (68).ToString(CultureInfo.InvariantCulture);
             _configValues[HDR_SUPPORT] = "false";
-            _configValues[LANGUAGE_INTERFACE] = "en";
+            _configValues[LANGUAGE_INTERFACE] = PreferenceRules.System;
+            _configValues[THEME_MODE] = PreferenceRules.System;
             _configValues[CUSTOM_API_KEY] = "";
             _configValues[CUSTOM_API_URL] = "";
             _configValues[CUSTOM_API_MODEL] = "";
@@ -688,7 +719,7 @@ namespace AlpWareStudio.Localay
         // What a factory reset keeps: API keys and the custom endpoint (tedious to find again), the
         // interface language, and one-time state (welcome screen and tips already seen, migrations done)
         private static bool IsKeptOnReset(string key) =>
-            key.Contains("api_key", StringComparison.OrdinalIgnoreCase) ||
+            ConfigFileSecurity.IsSecret(key) ||
             key == CUSTOM_API_URL || key == CUSTOM_API_MODEL ||
             key == LANGUAGE_INTERFACE ||
             key == SHOW_QUICK_START || key == ONBOARDING_TIPS_SHOWN || key == FORCE_UPDATE_PROMPT ||
@@ -826,20 +857,29 @@ namespace AlpWareStudio.Localay
 
             try
             {
+                bool includeSecrets = filePath == "Default";
+                var entries = _configValues.Where(e => includeSecrets || !ConfigFileSecurity.IsProfilePrivate(e.Key)).ToArray();
                 StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# Configuration file for WPFScreenCapture");
+                sb.AppendLine("# Localay settings; credentials are protected for the current Windows user.");
                 sb.AppendLine("# Format for single-line values: key|value|");
                 sb.AppendLine("# Format for multiline values: <key_start>multiple lines of content<key_end>");
                 sb.AppendLine();
 
                 // First add single-line entries
-                foreach (var entry in _configValues.Where(e => !ShouldBeMultiline(e.Key)))
+                foreach (var entry in entries.Where(e => !ShouldBeMultiline(e.Key)))
                 {
-                    sb.AppendLine($"{entry.Key}|{entry.Value}|");
+                    string value = entry.Value;
+                    if (ConfigFileSecurity.IsSecret(entry.Key))
+                    {
+                        CredentialRedactor.Register(value);
+                        value = string.IsNullOrEmpty(value) && _unreadableSecrets.TryGetValue(entry.Key, out var unreadable)
+                            ? unreadable : ConfigFileSecurity.Protect(value);
+                    }
+                    sb.AppendLine($"{entry.Key}|{value}|");
                 }
 
                 // Then add multiline entries
-                foreach (var entry in _configValues.Where(e => ShouldBeMultiline(e.Key)))
+                foreach (var entry in entries.Where(e => ShouldBeMultiline(e.Key)))
                 {
                     sb.AppendLine();
                     sb.AppendLine($"<{entry.Key}_start>");
@@ -849,10 +889,10 @@ namespace AlpWareStudio.Localay
 
                 // Write to file
                 if (filePath == "Default")
-                    File.WriteAllText(_configFilePath, sb.ToString());
+                    AppPaths.WriteAtomic(_configFilePath, sb.ToString());
                 else
                 {
-                    File.WriteAllText(filePath, sb.ToString());
+                    AppPaths.WriteAtomic(filePath, sb.ToString());
                 }
 
                 Console.WriteLine($"Saved config to {_configFilePath}");
@@ -860,7 +900,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error saving config: {ex.Message}");
-                MessageBox.Show($"Error saving configuration: {ex.Message}", "Configuration Error",
+                MessageBox.Show(UiText.Format("Msg_ConfigSaveError", ex.Message), UiText.Get("Title_ConfigError"),
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -869,7 +909,7 @@ namespace AlpWareStudio.Localay
         private bool ShouldBeMultiline(string key)
         {
             // List of keys that should use multiline format
-            return key.EndsWith("_multi") || key.EndsWith("_template");
+            return !ConfigFileSecurity.IsSecret(key) && (key.EndsWith("_multi") || key.EndsWith("_template"));
         }
 
         // Get a configuration value
@@ -878,6 +918,7 @@ namespace AlpWareStudio.Localay
             if (_configValues.TryGetValue(key, out var value))
             {
                 //Console.WriteLine($"ConfigManager.GetValue: Found value for key '{key}': '{value}'");
+                if (ConfigFileSecurity.IsSecret(key)) CredentialRedactor.Register(value);
                 return value;
             }
 
@@ -896,6 +937,11 @@ namespace AlpWareStudio.Localay
         public void SetValue(string key, string value)
         {
             _configValues[key] = value;
+            if (ConfigFileSecurity.IsSecret(key))
+            {
+                _unreadableSecrets.Remove(key);
+                CredentialRedactor.Register(value);
+            }
         }
 
         // Get overlay background color
@@ -1178,7 +1224,7 @@ namespace AlpWareStudio.Localay
         // Set Gemini API key
         public void SetGeminiApiKey(string apiKey)
         {
-            _configValues[GEMINI_API_KEY] = apiKey;
+            SetValue(GEMINI_API_KEY, apiKey);
             SaveConfig();
         }
 
@@ -1191,7 +1237,7 @@ namespace AlpWareStudio.Localay
         // Set Gemini API key
         public void SetGroqApiKey(string apiKey)
         {
-            _configValues[GROQ_API_KEY] = apiKey;
+            SetValue(GROQ_API_KEY, apiKey);
             SaveConfig();
         }
 
@@ -1267,7 +1313,7 @@ namespace AlpWareStudio.Localay
         // Set Mistral API key
         public void SetMistralApiKey(string apiKey)
         {
-            _configValues[MISTRAL_API_KEY] = apiKey;
+            SetValue(MISTRAL_API_KEY, apiKey);
             SaveConfig();
         }
 
@@ -1444,39 +1490,17 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        // Get current OCR method
         public string GetOcrMethod()
         {
-            string ocrMethod = GetValue(OCR_METHOD, "OneOCR"); // Default to OneOCR if not set
-            // Migrate legacy third-party OCR engines (removed) to OneOCR
-            if (ocrMethod == "EasyOCR" || ocrMethod == "PaddleOCR" || ocrMethod == "RapidOCR")
-            {
-                Console.WriteLine($"ConfigManager.GetOcrMethod() migrating legacy '{ocrMethod}' to 'OneOCR'");
-                _configValues[OCR_METHOD] = "OneOCR";
-                SaveConfig();
-                ocrMethod = "OneOCR";
-            }
-            Console.WriteLine($"ConfigManager.GetOcrMethod() returning: '{ocrMethod}'");
-            return ocrMethod;
+            string method = GetValue(OCR_METHOD, "Windows OCR");
+            return method == "OneOCR" && NativeOcrAssets.IsAvailable ? "OneOCR" : "Windows OCR";
         }
 
-        // Set current OCR method
         public void SetOcrMethod(string method)
         {
-            Console.WriteLine($"ConfigManager.SetOcrMethod called with method: {method}");
-            if (method == "Windows OCR" || method == "OneOCR")
-            {
-                _configValues[OCR_METHOD] = method;
-                SaveConfig();
-                Console.WriteLine($"OCR method set to {method} and saved to config");
-            }
-            else
-            {
-                // Migrate legacy third-party OCR (EasyOCR, PaddleOCR, RapidOCR) to OneOCR
-                Console.WriteLine($"WARNING: OCR method '{method}' is no longer supported. Falling back to OneOCR.");
-                _configValues[OCR_METHOD] = "OneOCR";
-                SaveConfig();
-            }
+            _configValues[OCR_METHOD] = method == "OneOCR" && NativeOcrAssets.IsAvailable
+                ? "OneOCR" : "Windows OCR";
+            SaveConfig();
         }
 
         public string GetDefaultServicePrompt(string service)
@@ -1715,16 +1739,23 @@ namespace AlpWareStudio.Localay
             return value.ToLower() == "true";
         }
 
-        public bool IsDarkModeEnabled()
+        public string GetThemeMode()
         {
-            string value = GetValue(DARK_MODE, "false");
-            return value.ToLower() == "true";
+            _configValues.TryGetValue(THEME_MODE, out string? mode);
+            _configValues.TryGetValue(DARK_MODE, out string? legacyDark);
+            return PreferenceRules.ResolveThemeMode(mode, legacyDark);
         }
 
-        public void SetDarkModeEnabled(bool value)
+        public void SetThemeMode(string mode)
         {
-            SetValue(DARK_MODE, value ? "true" : "false");
+            _configValues[THEME_MODE] = PreferenceRules.ResolveThemeMode(mode);
+            _configValues.Remove(DARK_MODE);
+            SaveConfig();
         }
+
+        // Compatibility helpers: the boolean describes the applied theme, not the stored system preference.
+        public bool IsDarkModeEnabled() => ThemeManager.IsDark;
+        public void SetDarkModeEnabled(bool value) => SetThemeMode(value ? "dark" : "light");
 
         // Get similary threshold
         public double GetTextSimilarThreshold()
@@ -1746,7 +1777,7 @@ namespace AlpWareStudio.Localay
         // Set custom API key
         public void SetCustomApiKey(string apiKey)
         {
-            _configValues[CUSTOM_API_KEY] = apiKey;
+            SetValue(CUSTOM_API_KEY, apiKey);
             SaveConfig();
         }
 
@@ -2374,14 +2405,14 @@ namespace AlpWareStudio.Localay
         // Get/Set language interface
         public string GetLanguageInterface()
         {
-            return GetValue(LANGUAGE_INTERFACE, "en"); // Default to English
+            return PreferenceRules.NormalizeLanguagePreference(GetValue(LANGUAGE_INTERFACE, PreferenceRules.System));
         }
 
         public void SetLanguageInterface(string language)
         {
             if (!string.IsNullOrWhiteSpace(language))
             {
-                _configValues[LANGUAGE_INTERFACE] = language;
+                _configValues[LANGUAGE_INTERFACE] = PreferenceRules.NormalizeLanguagePreference(language);
                 SaveConfig();
                 Console.WriteLine($"Language interface set to: {language}");
             }
@@ -2703,7 +2734,7 @@ namespace AlpWareStudio.Localay
 
         public void SetElevenLabsApiKey(string apiKey)
         {
-            _configValues[ELEVENLABS_API_KEY] = apiKey;
+            SetValue(ELEVENLABS_API_KEY, apiKey);
             SaveConfig();
             Console.WriteLine("ElevenLabs API key updated");
         }
@@ -2765,7 +2796,7 @@ namespace AlpWareStudio.Localay
 
         public void SetGoogleTtsApiKey(string apiKey)
         {
-            _configValues[GOOGLE_TTS_API_KEY] = apiKey;
+            SetValue(GOOGLE_TTS_API_KEY, apiKey);
             SaveConfig();
             Console.WriteLine("Google TTS API key updated");
         }
@@ -2877,7 +2908,7 @@ namespace AlpWareStudio.Localay
 
         public void SetChatGptApiKey(string apiKey)
         {
-            _configValues[CHATGPT_API_KEY] = apiKey;
+            SetValue(CHATGPT_API_KEY, apiKey);
             SaveConfig();
             Console.WriteLine("ChatGPT API key updated");
         }
@@ -3100,20 +3131,20 @@ namespace AlpWareStudio.Localay
             }
 
             string keysValue = string.Join("+++", keys);
-            _configValues[keysConfigKey] = keysValue;
-            SaveConfig();
+            SetValue(keysConfigKey, keysValue);
 
             // Update current api key
             string singleKeyConfigKey = GetSingleKeyConfigKey(serviceType);
             if (keys.Count > 0)
             {
-                _configValues[singleKeyConfigKey] = keys[0];
+                SetValue(singleKeyConfigKey, keys[0]);
             }
             else
             {
-                _configValues[singleKeyConfigKey] = "";
+                SetValue(singleKeyConfigKey, "");
             }
 
+            SaveConfig();
             Console.WriteLine($"Saved {keys.Count} API keys for {serviceType}");
         }
 
@@ -3135,7 +3166,7 @@ namespace AlpWareStudio.Localay
             }
             // Always update single keys with the latest key
             string singleKeyConfigKey = GetSingleKeyConfigKey(serviceType);
-            _configValues[singleKeyConfigKey] = apiKey;
+            SetValue(singleKeyConfigKey, apiKey);
             SaveConfig();
         }
 
@@ -3400,7 +3431,7 @@ namespace AlpWareStudio.Localay
 
         public void SetGoogleTranslateApiKey(string apiKey)
         {
-            _configValues[GOOGLE_TRANSLATE_API_KEY] = apiKey;
+            SetValue(GOOGLE_TRANSLATE_API_KEY, apiKey);
             SaveConfig();
             Console.WriteLine("Google Translate API key updated");
         }
@@ -3414,7 +3445,7 @@ namespace AlpWareStudio.Localay
         // Set Microsoft API key (single)
         public void SetMicrosoftApiKey(string apiKey)
         {
-            _configValues[MICROSOFT_API_KEY] = apiKey;
+            SetValue(MICROSOFT_API_KEY, apiKey);
             SaveConfig();
             Console.WriteLine("Microsoft API key updated");
         }
@@ -3427,7 +3458,7 @@ namespace AlpWareStudio.Localay
 
         public void SetMicrosoftLegacySignatureKey(string key)
         {
-            _configValues[MICROSOFT_LEGACY_SIGNATURE_KEY] = key;
+            SetValue(MICROSOFT_LEGACY_SIGNATURE_KEY, key);
             SaveConfig();
         }
 
@@ -3465,7 +3496,7 @@ namespace AlpWareStudio.Localay
         }
         public void SetOpenAiRealtimeApiKey(string apiKey)
         {
-            _configValues[OPENAI_REALTIME_API_KEY] = apiKey;
+            SetValue(OPENAI_REALTIME_API_KEY, apiKey);
             SaveConfig();
         }
         // Get whether audio service should auto-translate transcripts
@@ -3570,6 +3601,9 @@ namespace AlpWareStudio.Localay
                 // Save to config
                 _configValues[TRANSLATION_AREAS] = sb.ToString();
 
+                if (string.IsNullOrWhiteSpace(profileName) || profileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                    profileName.Contains('/') || profileName.Contains('\\') || profileName is "." or "..")
+                    throw new ArgumentException("Invalid profile name.", nameof(profileName));
                 string pathProfile = Path.Combine(_profileFolderPath, $"{profileName}.txt");
                 // Save config to file
                 SaveConfig(pathProfile);

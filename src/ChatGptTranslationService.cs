@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -117,7 +117,7 @@ namespace AlpWareStudio.Localay
         public ChatGptTranslationService()
         {
             // Get the configuration file path
-            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            string appDirectory = AppPaths.DataDirectory;
             _configFilePath = System.IO.Path.Combine(appDirectory, "chatgpt_config.txt");
             
             // Ensure the config file exists
@@ -168,7 +168,7 @@ namespace AlpWareStudio.Localay
                 }
 
                 // Log the original input
-                //Console.WriteLine($"ChatGPT input JSON: {jsonData}");
+                //LogManager.Instance.WriteContentLine($"ChatGPT input JSON: {jsonData}");
 
                 // Parse the input JSON
                 JsonElement inputJson = JsonSerializer.Deserialize<JsonElement>(jsonData);
@@ -255,11 +255,11 @@ namespace AlpWareStudio.Localay
                     // Log to console for debugging (limited to first 500 chars)
                     if (responseContent.Length > 500)
                     {
-                        Console.WriteLine($"ChatGPT API response: {responseContent.Substring(0, 500)}...");
+                        LogManager.Instance.WriteContentLine($"ChatGPT API response: {responseContent.Substring(0, 500)}...");
                     }
                     else
                     {
-                        Console.WriteLine($"ChatGPT API response: {responseContent}");
+                        LogManager.Instance.WriteContentLine($"ChatGPT API response: {responseContent}");
                     }
 
                     try
@@ -274,11 +274,11 @@ namespace AlpWareStudio.Localay
                             // Log the extracted translation
                             if (translatedText.Length > 100)
                             {
-                                Console.WriteLine($"ChatGPT translation extracted: {translatedText.Substring(0, 100)}...");
+                                LogManager.Instance.WriteContentLine($"ChatGPT translation extracted: {translatedText.Substring(0, 100)}...");
                             }
                             else
                             {
-                                Console.WriteLine($"ChatGPT translation extracted: {translatedText}");
+                                LogManager.Instance.WriteContentLine($"ChatGPT translation extracted: {translatedText}");
                             }
 
                             // Clean up the response - sometimes there might be markdown code block markers
@@ -347,18 +347,7 @@ namespace AlpWareStudio.Localay
                                         // For game JSON format, we need to match the format that the other translation services use
                                         Console.WriteLine("This is a game JSON format - wrapping in the standard format");
 
-                                        // Save the translated JSON to a debug file for inspection
-                                        try
-                                        {
-                                            string appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-                                            string debugFilePath = System.IO.Path.Combine(appDirectory, "chatgpt_translation_debug.txt");
-                                            System.IO.File.WriteAllText(debugFilePath, translatedText);
-                                            Console.WriteLine($"Debug translation saved to {debugFilePath}");
-                                        }
-                                        catch (Exception ex)
-                                        {
-                                            Console.WriteLine($"Failed to write debug file: {ex.Message}");
-                                        }
+                                        LogManager.Instance.WriteDiagnostic("chatgpt_translation_debug.txt", translatedText);
 
                                         // Based on the format of other translators, we need the text to be wrapped
                                         var outputJson = new Dictionary<string, object>
@@ -421,7 +410,7 @@ namespace AlpWareStudio.Localay
                 else
                 {
                     Console.WriteLine($"Error calling ChatGPT API: {response.StatusCode}");
-                    Console.WriteLine($"Response: {responseContent}");
+                    LogManager.Instance.WriteContentLine($"Response: {responseContent}");
 
                     // A model-specific parameter was rejected: adjust it and try again
                     if (response.StatusCode == HttpStatusCode.BadRequest &&
@@ -440,7 +429,7 @@ namespace AlpWareStudio.Localay
                             if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
                             {
                                 ConfigManager.Instance.SetChatGptApiKey(newApikey);
-                                Console.WriteLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
+                                LogManager.Instance.WriteContentLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
                                 _retryCount++;
                             }
                             else

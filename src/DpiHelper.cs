@@ -1,4 +1,4 @@
-﻿// DpiHelper.cs - Helper class for DPI scaling operations
+// DpiHelper.cs - Helper class for DPI scaling operations
 using System;
 using System.Windows;
 using System.Windows.Forms;
@@ -288,6 +288,28 @@ namespace AlpWareStudio.Localay
             }
         }
         
+        /// <summary>Keep a settings/guide window within the current monitor's physical work area.</summary>
+        public static void FitWindowToWorkArea(Window window, bool center = false)
+        {
+            IntPtr hwnd = new System.Windows.Interop.WindowInteropHelper(window).Handle;
+            if (hwnd == IntPtr.Zero || !GetWindowRect(hwnd, out RECT rect)) return;
+            var workArea = Screen.FromHandle(hwnd).WorkingArea;
+            var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+            double availableWidth = workArea.Width / dpi.DpiScaleX;
+            double availableHeight = workArea.Height / dpi.DpiScaleY;
+            window.MinWidth = Math.Min(window.MinWidth, availableWidth);
+            window.MinHeight = Math.Min(window.MinHeight, availableHeight);
+            window.Width = Math.Min(double.IsNaN(window.Width) ? window.ActualWidth : window.Width, availableWidth);
+            window.Height = Math.Min(double.IsNaN(window.Height) ? window.ActualHeight : window.Height, availableHeight);
+            int width = Math.Min(workArea.Width, (int)Math.Round(window.Width * dpi.DpiScaleX));
+            int height = Math.Min(workArea.Height, (int)Math.Round(window.Height * dpi.DpiScaleY));
+            int left = center ? workArea.Left + (workArea.Width - width) / 2
+                : Math.Clamp(rect.Left, workArea.Left, workArea.Right - width);
+            int top = center ? workArea.Top + (workArea.Height - height) / 2
+                : Math.Clamp(rect.Top, workArea.Top, workArea.Bottom - height);
+            PositionWindowPhysical(hwnd, left, top, width, height);
+        }
+
         /// <summary>
         /// Position a window using physical screen pixel coordinates via Win32 SetWindowPos.
         /// This bypasses WPF's coordinate system which can misinterpret positions on

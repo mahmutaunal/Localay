@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -83,7 +83,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"Error loading default language: {ex.Message}");
+                Console.Error.WriteLine($"Error loading default language: {ex.Message}");
             }
         }
 
@@ -127,7 +127,10 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
-                System.Windows.MessageBox.Show($"Error loading language {langCode}: {ex.Message}");
+                _strings = new Dictionary<string, string>(_defaultStrings);
+                Console.Error.WriteLine($"Error loading language {langCode}: {ex.Message}");
+                OnPropertyChanged(nameof(Strings));
+                OnPropertyChanged(string.Empty);
             }
         }
 

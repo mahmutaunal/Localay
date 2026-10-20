@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -139,12 +139,12 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Loaded LLM prompt: {(string.IsNullOrEmpty(llmPrompt) ? "Not set" : $"{llmPrompt.Length} chars")}");
 
                 // Load force cursor visible setting
-                // Force cursor visibility is now handled by MouseManager
+                // Use the normal Windows/game cursor visibility.
 
                 Console.WriteLine($"Using {MainWindow.Instance.GetSelectedOcrMethod()} (built-in)");
 
                 // Update status message in the UI
-                MainWindow.Instance.SetStatus($"Using {MainWindow.Instance.GetSelectedOcrMethod()} (built-in)");
+                MainWindow.Instance.SetOcrStatus(MainWindow.Instance.GetSelectedOcrMethod());
             }
             catch (Exception ex)
             {
@@ -723,8 +723,8 @@ namespace AlpWareStudio.Localay
             }
 
             Console.WriteLine($"Content is similar to previous, skipping translation (similarity={similarity:F2} >= threshold={threshold:F2})");
-            Console.WriteLine($"  prev: '{Truncate(_lastTextContent)}'");
-            Console.WriteLine($"  new:  '{Truncate(textContent)}'");
+            LogManager.Instance.WriteContentLine($"  prev: '{Truncate(_lastTextContent)}'");
+            LogManager.Instance.WriteContentLine($"  new:  '{Truncate(textContent)}'");
         }
 
         // Filter results array to remove objects that should be ignored based on ignore phrases
@@ -887,7 +887,7 @@ namespace AlpWareStudio.Localay
                             }
                             catch (RegexMatchTimeoutException)
                             {
-                                Console.WriteLine($"Regex timed out for phrase '{phrase}' on text '{text}'");
+                                LogManager.Instance.WriteContentLine($"Regex timed out for phrase '{phrase}' on text '{text}'");
                             }
                         }
                         break;
@@ -1280,7 +1280,7 @@ namespace AlpWareStudio.Localay
                 }
                 MonitorWindow.Instance.CreateMonitorOverlayFromTextObject(this, textObject);
 
-                // Console.WriteLine($"Added text '{text}' at position ({x}, {y}) with size {width}x{height}");
+                // LogManager.Instance.WriteContentLine($"Added text '{text}' at position ({x}, {y}) with size {width}x{height}");
             }
             catch (Exception ex)
             {
@@ -1697,7 +1697,7 @@ namespace AlpWareStudio.Localay
 
                 string combinedAudio = string.Join(" ", batchToProcess);
 
-                Console.WriteLine($"Combined audio text: '{combinedAudio}'");
+                LogManager.Instance.WriteContentLine($"Combined audio text: '{combinedAudio}'");
 
                 var audioTextObject = new TextObject(
                     text: combinedAudio,
@@ -1798,7 +1798,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error during cleanup: {ex.Message}", "Error",
+                MessageBox.Show(UiText.Format("Msg_CleanupError", ex.Message), UiText.Get("Title_Error"),
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -1845,7 +1845,7 @@ namespace AlpWareStudio.Localay
                 // Just raise the event to notify MonitorWindow
                 TextObjectAdded?.Invoke(this, textObject);
 
-                Console.WriteLine($"Added text '{text}' at position {x}, {y}");
+                LogManager.Instance.WriteContentLine($"Added text '{text}' at position {x}, {y}");
             }
             catch (Exception ex)
             {
@@ -2119,7 +2119,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    Console.WriteLine($"Skipping empty translation - Original: '{originalText}', Translated: '{translatedText}'");
+                    LogManager.Instance.WriteContentLine($"Skipping empty translation - Original: '{originalText}', Translated: '{translatedText}'");
                 }
             }
         }

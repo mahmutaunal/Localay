@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NuGetAudit>true</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup><Compile Include="../../src/PreferenceRules.cs" Link="PreferenceRules.cs" /><Compile Include="../../src/WindowsPreferenceReader.cs" Link="WindowsPreferenceReader.cs" /></ItemGroup>
+</Project>

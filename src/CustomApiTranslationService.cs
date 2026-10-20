@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -127,7 +127,7 @@ namespace AlpWareStudio.Localay
                 {
                     string errorMessage = await response.Content.ReadAsStringAsync();
                     _consecutiveFailures++;
-                    Console.WriteLine($"Custom API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
+                    LogManager.Instance.WriteContentLine($"Custom API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
 
                     // Check if we should switch API key
                     if (ShouldSwitchApiKey(response.StatusCode, errorMessage))
@@ -139,7 +139,7 @@ namespace AlpWareStudio.Localay
                             if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
                             {
                                 ConfigManager.Instance.SetCustomApiKey(newApikey);
-                                Console.WriteLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
+                                LogManager.Instance.WriteContentLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
                                 _retryCount++;
                             }
                             else
@@ -170,7 +170,7 @@ namespace AlpWareStudio.Localay
                             if (_consecutiveFailures > 3)
                             {
                                 // Write error to file
-                                System.IO.File.WriteAllText("custom_api_last_error.txt", $"Custom API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
+                                LogManager.Instance.WriteDiagnostic("custom_api_last_error.txt", $"Custom API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
 
                                 // Show error message to user
                                 TranslationErrorNotifier.ShowOnce("Custom API",
@@ -188,7 +188,7 @@ namespace AlpWareStudio.Localay
                     if (_consecutiveFailures > 3)
                     {
                         // Write error to file
-                        System.IO.File.WriteAllText("custom_api_last_error.txt", $"Custom API error: {response.StatusCode}\n\nFull response: {errorMessage}");
+                        LogManager.Instance.WriteDiagnostic("custom_api_last_error.txt", $"Custom API error: {response.StatusCode}\n\nFull response: {errorMessage}");
 
                         // Show general error if JSON parsing failed
                         TranslationErrorNotifier.ShowOnce("Custom API",
@@ -204,7 +204,7 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Translation API error: {ex.Message}");
 
                 // Write error to file
-                System.IO.File.WriteAllText("custom_api_last_error.txt", $"Custom API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+                LogManager.Instance.WriteDiagnostic("custom_api_last_error.txt", $"Custom API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
 
                 // Show error message to user
                 TranslationErrorNotifier.ShowOnce("Custom API",

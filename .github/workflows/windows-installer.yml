@@ -1,4 +1,4 @@
-name: Build Windows Release
+name: Build Windows Installer
 
 on:
   pull_request:
@@ -11,149 +11,94 @@ permissions:
 
 jobs:
   build-windows:
-    name: Build Localay Windows x64
+    name: Build, test and scan Localay setup
     runs-on: windows-2025
-    timeout-minutes: 30
-
+    timeout-minutes: 45
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
-      CONFIGURATION: Release
-      RUNTIME: win-x64
-      PROJECT: Localay.csproj
-      PRODUCT: Localay
-      VERSION: 1.0.0
-
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Setup .NET 9
+      - name: Setup .NET 10
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "9.0.x"
+          global-json-file: global.json
           cache: true
-          cache-dependency-path: Localay.csproj
+          cache-dependency-path: packages.lock.json
 
-      - name: Verify project
+      - name: Run combined project validation, including Windows WPF
+        shell: pwsh
+        run: ./Verify-Project.ps1
+
+      - name: Install verified, pinned Inno Setup compiler
+        shell: pwsh
+        run: ./installer/Install-Compiler.ps1
+
+      - name: Prepare real Defender scans on the disposable hosted runner
+        shell: pwsh
+        run: ./.github/scripts/Prepare-Defender.ps1
+
+      - name: Publish, verify, package and scan with Microsoft Defender
+        shell: pwsh
+        run: ./Publish-Windows.ps1
+
+      - name: Test installation, reinstallation and uninstallation
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          dotnet --info
-          if (-not (Test-Path -LiteralPath $env:PROJECT -PathType Leaf)) {
-            throw "Project file not found: $env:PROJECT"
-          }
+          $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe')
+          if ($installers.Count -ne 1) { throw "Expected exactly one installer." }
+          ./tests/InstallerSmoke.ps1 -InstallerPath $installers[0].FullName -PublishDirectory artifacts/publish
 
-      - name: Restore dependencies
+      - name: Record dependency security report
         shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          dotnet restore $env:PROJECT -r $env:RUNTIME
-          if ($LASTEXITCODE -ne 0) { throw "dotnet restore failed." }
-
-      - name: Build release
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          dotnet build $env:PROJECT `
-            -c $env:CONFIGURATION `
-            -r $env:RUNTIME `
-            --self-contained true `
-            --no-restore `
-            -bl:artifacts/build.binlog
-          if ($LASTEXITCODE -ne 0) { throw "dotnet build failed." }
-
-      - name: Publish self-contained Windows build
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $publish = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish"
-
-          dotnet publish $env:PROJECT `
-            -c $env:CONFIGURATION `
-            -r $env:RUNTIME `
-            --self-contained true `
-            --no-restore `
-            -p:PublishSingleFile=false `
-            -p:PublishTrimmed=false `
-            -o $publish
-
-          if ($LASTEXITCODE -ne 0) { throw "dotnet publish failed." }
-
-          $exe = Join-Path $publish "Localay.exe"
-          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
-            throw "Expected executable was not produced: $exe"
-          }
-
-          $exeInfo = Get-Item -LiteralPath $exe
-          if ($exeInfo.Length -le 0) { throw "Localay.exe is empty." }
-          Write-Host "Built $($exeInfo.FullName) ($($exeInfo.Length) bytes)"
-
-      - name: Verify portable runtime and dependencies
-        shell: pwsh
-        run: |
-          ./Verify-Publish.ps1 -PublishDirectory (Join-Path $env:GITHUB_WORKSPACE "artifacts\publish")
-          dotnet list $env:PROJECT package --include-transitive
-          if ($LASTEXITCODE -ne 0) { throw "Dependency audit failed." }
-
-      - name: Add distribution documents
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $publish = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish"
-
-          foreach ($file in @("README.md", "LICENSE.md", "THIRD_PARTY_NOTICES.md")) {
-            $source = Join-Path $env:GITHUB_WORKSPACE $file
-            if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-              throw "Required distribution file is missing: $file"
+          dotnet package list --project ./Localay.csproj --no-restore --vulnerable --include-transitive --format json > artifacts/dependency-audit.json
+          if ($LASTEXITCODE -ne 0) { throw "Dependency audit could not complete." }
+          $report = Get-Content artifacts/dependency-audit.json -Raw | ConvertFrom-Json
+          if ($report.sources -eq $null) { throw "Dependency audit returned no sources." }
+          if ($report.problems | Where-Object { $_.level -eq "error" }) { throw "Dependency audit returned an error." }
+          foreach ($project in $report.projects) {
+            foreach ($framework in $project.frameworks) {
+              foreach ($package in @($framework.topLevelPackages) + @($framework.transitivePackages)) {
+                if ($package.vulnerabilities) { throw "Vulnerable dependency: $($package.id)" }
+              }
             }
-            Copy-Item -LiteralPath $source -Destination $publish -Force
           }
 
-      - name: Create portable Windows package
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          $publish = Join-Path $env:GITHUB_WORKSPACE "artifacts\publish"
-          $packageDir = Join-Path $env:GITHUB_WORKSPACE "artifacts\package"
-          $packageName = "$env:PRODUCT-$env:VERSION-windows-x64"
-          $staging = Join-Path $packageDir $packageName
-          $zip = Join-Path $packageDir "$packageName.zip"
-
-          New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
-          New-Item -ItemType Directory -Force -Path $staging | Out-Null
-          Copy-Item -Path (Join-Path $publish "*") -Destination $staging -Recurse -Force
-
-          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
-          Compress-Archive -Path $staging -DestinationPath $zip -CompressionLevel Optimal
-
-          if (-not (Test-Path -LiteralPath $zip -PathType Leaf)) {
-            throw "Windows package was not created."
-          }
-
-          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
-          "$hash  $packageName.zip" | Set-Content `
-            -LiteralPath (Join-Path $packageDir "$packageName.sha256") `
-            -Encoding ascii
-
-          Write-Host "Package: $zip"
-          Write-Host "SHA-256: $hash"
-
-      - name: Upload Windows package
+      - name: Upload Windows setup
         uses: actions/upload-artifact@v4
         with:
-          name: Localay-1.0.0-windows-x64
+          name: Localay-Setup-windows-x64
           path: |
-            artifacts/package/Localay-1.0.0-windows-x64.zip
-            artifacts/package/Localay-1.0.0-windows-x64.sha256
+            artifacts/installer/*-Setup-x64.exe
+            artifacts/installer/*.sha256
+            artifacts/installer/build-info.json
           if-no-files-found: error
           compression-level: 0
           retention-days: 30
 
-      - name: Upload build diagnostics
-        if: failure()
+      - name: Upload optional portable package
         uses: actions/upload-artifact@v4
         with:
-          name: Localay-build-diagnostics
-          path: artifacts/*.binlog
+          name: Localay-Portable-windows-x64
+          path: |
+            artifacts/package/*.zip
+            artifacts/package/*.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Localay-validation
+          path: |
+            artifacts/defender*.json
+            artifacts/dependency-audit.json
+            artifacts/installer-tests/
+            artifacts/validation/project/
           if-no-files-found: ignore
+          retention-days: 30

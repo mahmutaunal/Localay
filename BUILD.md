@@ -1,15 +1,54 @@
 # Building Localay
 
-1. Install the .NET 9 SDK on Windows 10/11 x64.
-2. Open PowerShell in the repository root.
-3. Run `dotnet restore .\Localay.csproj -r win-x64`.
-4. Run `dotnet build .\Localay.csproj -c Release --no-restore` (output: `bin/Release`).
-5. Run `./Publish-Windows.ps1` for verified self-contained output in `artifacts/publish`.
+Use the .NET 10 LTS SDK selected by `global.json`. The normal release target is Windows x64, using the Windows 10 19041 API surface; test on supported Windows versions before release. PowerShell release scripts require PowerShell 7.
 
-The Windows TFM supplies the Windows SDK projections and WinRT runtime. Do not add the CsWinRT projection generator solely to consume Windows APIs; it adds a machine-installed Windows SDK dependency that this application does not need.
+```powershell
+dotnet restore ./Localay.csproj -r win-x64 --locked-mode
+dotnet build ./Localay.csproj -c Release -r win-x64 --no-restore
+./Verify-SecurityPolicy.ps1
+dotnet run --project ./tests/SecurityChecks/SecurityChecks.csproj -c Release
+./installer/Install-Compiler.ps1
+# For local builds, set LOCALAY_ISCC to the verified compiler path printed by that script.
+./Publish-Windows.ps1
+```
 
-The Windows GitHub Actions workflow builds Release, publishes win-x64, verifies runtime/architecture/assets and the absence of retired speech dependencies, then uploads a portable ZIP and SHA-256 checksum. Pushes to main or codex branches, pull requests and manual dispatch trigger it. Build failures upload an MSBuild binary log.
+`Publish-Windows.ps1` clears the generated `artifacts/publish` directory, publishes the multi-file .NET application, verifies its standard-user manifest and distribution contents, and produces both the optional portable ZIP and the main per-user setup EXE. It updates Defender signatures and scans the raw payload and both distribution formats, failing if validation cannot complete. Output: `artifacts/package` for the ZIP, `artifacts/installer` for `Localay-<version>-Setup-x64.exe` and checksum. The compiler must be installed and selected with `LOCALAY_ISCC`; GitHub Actions handles this automatically using the hash/signature-verified pinned official compiler. Nothing is signed by this project. See [installer/README.md](installer/README.md) for exact workflow/artifact instructions.
 
-Speech recognition and TTS engines, downloaders and controls have been removed. Historic configuration keys remain readable for existing profiles; no speech engine uses them. Capture, OCR, translation, overlay and chat history remain in place.
+The **Build Windows Installer** GitHub Actions workflow uses the same scripts, runs Windows security regression checks, and then automatically tests setup, same-version reinstall and uninstall on its disposable Windows runner. It compares installed file hashes and checks that user data survives. No physical Windows machine is required to trigger this from a Mac. Package version and displayed application version come from `Localay.csproj`. Update `global.json` to a serviced .NET 10 SDK and regenerate `packages.lock.json` intentionally when updating dependencies. NuGet vulnerability warnings for direct and transitive dependencies fail the restore/build.
 
-Localay targets Windows APIs and cannot be runtime-tested on macOS/Linux. A Windows interactive smoke test of capture and overlays is still required before publishing a binary release.
+The default build uses Windows OCR; install its source-language feature in Windows Settings. OneOCR files are excluded from the standard package. See `SECURITY.md` for optional asset licensing, pinned hashes and signature checks before a custom redistribution.
+
+The Windows TFM supplies SDK projections and WinRT runtime. Do not add CsWinRT projection generation solely to consume Windows APIs.
+
+## Cross-platform validation
+
+On macOS/Linux, `dotnet build ./Localay.csproj -c Release -r win-x64 -p:EnableWindowsTargeting=true` can check Windows compilation. `dotnet run --project ./tests/SecurityChecks/SecurityChecks.csproj -c Release` exercises portable migration/redaction/restart-argument checks; DPAPI and WPF integration tests run on Windows only. A Windows self-contained executable cannot be runtime-tested on macOS/Linux. Cross-compilation and package checks do not imply Defender, SmartScreen, capture or overlay validation. Follow the interactive release checks in `SECURITY.md` before public distribution.
+
+Installer policy checks also run on macOS in PowerShell 7: `./tests/InstallerPolicyChecks.ps1`. Installer compilation and automatic lifecycle checks run on Windows in CI. No local cross-build should be described as a completed installer run or Defender scan.
+
+UI regression checks also run on macOS/Linux:
+
+```powershell
+dotnet run --project ./tests/PreferenceChecks/PreferenceChecks.csproj -c Release
+dotnet run --project ./tests/LocalizationChecks/LocalizationChecks.csproj -c Release
+```
+
+The localization check validates English/Turkish key parity, duplicate/empty values, format placeholders, XAML/code resource references, language names and hardcoded UI text. Technical logs, model/provider identifiers and external error details retain their original language. The pinned SDK supplies the source parser; no additional parser package is downloaded. These source checks do not exercise WPF bindings or layout.
+
+After the Windows Release build, validate branding, language-specific product links and the exact license documents embedded in Localay.dll:
+
+```powershell
+dotnet run --project ./tests/BrandChecks/BrandChecks.csproj -c Release -- . ./bin/Release/Localay.dll
+```
+
+This check inspects the Windows assembly as data, so it also runs on macOS/Linux without launching WPF or opening any external links.
+
+## Combined validation
+
+Run `./Verify-Project.ps1` in PowerShell 7 for a locked/audited restore, Windows Release build, source/installer policies, security, preferences, localization and product/license checks. On Windows it also runs `tests/UiWindowsChecks`, an STA WPF host that exercises live language changes, production language templates, theme brushes, About and API-key dialogs. It does not start Localay's capture loop, create user settings, register hotkeys, or open links. On macOS/Linux that runtime check is explicitly recorded as `not_run`.
+
+`artifacts/validation/project/summary.json` records passed, failed and not-run steps, with one log per check. Independent checks continue after a failure; the command exits unsuccessfully if any step fails. `-SkipRestore` is for repeated checks with existing restored assets and is explicitly reported as skipping the fresh audit. GitHub Actions runs the full command and uploads its reports even on failure, then separately builds/scans the setup and tests its installation lifecycle.
+
+To cross-compile the Windows WPF check on macOS, use `dotnet build ./tests/UiWindowsChecks/UiWindowsChecks.csproj -c Release -p:EnableWindowsTargeting=true`. Compilation does not execute that check.
+
+Release validation also checks that published English/Turkish resources exactly match the source files. The publish regression suite rejects missing language files and stale but valid Turkish JSON, in addition to private data and an incorrect runtime.

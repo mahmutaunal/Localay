@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -403,7 +403,7 @@ namespace AlpWareStudio.Localay
             selectionRectangle.VerticalAlignment = System.Windows.VerticalAlignment.Top;
             
             // Display size information in the instruction text
-            instructionText.Text = $"{LocalizationManager.Instance[_selectionLabelKey]}: {(int)width} x {(int)height}";
+            instructionText.Text = $"{LocalizationManager.Instance[_selectionLabelKey]}: {(int)width} × {(int)height}";
         }
         
         [DllImport("user32.dll")]

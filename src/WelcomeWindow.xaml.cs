@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
@@ -19,7 +19,7 @@ namespace AlpWareStudio.Localay
         // Common game → reader language pairs offered as one-click presets
         private static readonly (string Source, string Target)[] CommonPairs =
         {
-            ("ja", "en"), ("ja", "vi"), ("ko", "en"), ("ch_sim", "en"), ("ch_sim", "vi"), ("en", "vi")
+            ("en", "tr"), ("ja", "tr"), ("ja", "en"), ("ko", "en")
         };
 
         private bool _isLoading = true;
@@ -32,6 +32,7 @@ namespace AlpWareStudio.Localay
         public WelcomeWindow()
         {
             InitializeComponent();
+            Loaded += (s, e) => DpiHelper.FitWindowToWorkArea(this, center: true);
 
             // Language lists are copied from the main window so this screen offers exactly the codes OCR/translation use
             LoadInterfaceLanguages();
@@ -42,9 +43,11 @@ namespace AlpWareStudio.Localay
             UpdateFormattedTexts();
 
             LocalizationManager.Instance.PropertyChanged += LocalizationManager_PropertyChanged;
+            ApplicationPreferences.Changed += ApplicationPreferences_Changed;
             Closed += (s, e) =>
             {
                 LocalizationManager.Instance.PropertyChanged -= LocalizationManager_PropertyChanged;
+                ApplicationPreferences.Changed -= ApplicationPreferences_Changed;
                 // Shown once automatically; it stays reachable from the Quick Start button
                 ConfigManager.Instance.SetNeedShowQuickStart(false);
             };
@@ -54,16 +57,22 @@ namespace AlpWareStudio.Localay
 
         private void LoadInterfaceLanguages()
         {
-            string currentLanguage = ConfigManager.Instance.GetLanguageInterface();
-            foreach (ComboBoxItem mainItem in MainWindow.Instance.languageSelector.Items)
-            {
-                var item = new ComboBoxItem { Content = mainItem.Content, Tag = mainItem.Tag };
-                InterfaceLanguageComboBox.Items.Add(item);
-                if (string.Equals(mainItem.Tag as string, currentLanguage, StringComparison.OrdinalIgnoreCase))
-                {
-                    InterfaceLanguageComboBox.SelectedItem = item;
-                }
-            }
+            InterfaceLanguageOptions.Populate(InterfaceLanguageComboBox);
+            RefreshInterfacePreference();
+        }
+
+        private void RefreshInterfacePreference()
+        {
+            bool loading = _isLoading;
+            _isLoading = true;
+            try { InterfaceLanguageOptions.SelectPreference(InterfaceLanguageComboBox, ApplicationPreferences.LanguagePreference); }
+            finally { _isLoading = loading; }
+        }
+
+        private void ApplicationPreferences_Changed(object? sender, EventArgs e)
+        {
+            RefreshInterfacePreference();
+            UpdateFormattedTexts();
         }
 
         private static void PopulateLanguageComboBox(ComboBox target, ComboBox source, string selectedCode)
@@ -122,6 +131,11 @@ namespace AlpWareStudio.Localay
 
         private void LocalizationManager_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
+            foreach (var combo in new[] { SourceLanguageComboBox, TargetLanguageComboBox })
+                foreach (var item in combo.Items.OfType<ComboBoxItem>())
+                    item.Content = GetLanguageDisplayName((string)item.Tag);
+            CommonPairsPanel.Children.Clear();
+            BuildCommonPairButtons();
             UpdateFormattedTexts();
         }
 
@@ -134,14 +148,14 @@ namespace AlpWareStudio.Localay
 
             ReadyText.Text = string.Format(strings["Welcome_ReadyDesc"],
                 ConfigManager.Instance.GetOcrMethod(),
-                ConfigManager.Instance.GetCurrentTranslationService(),
+                UiText.Service(ConfigManager.Instance.GetCurrentTranslationService()),
                 strings["Btn_Settings"]);
 
             NextStepsText.Text = string.Format(strings["Welcome_NextDesc"],
-                strings["Btn_SelectArea"], strings["Btn_SelectWindow"], strings["Btn_Start"],
+                strings["Btn_SelectArea"], strings["Btn_SelectWindow"], strings["Main_Start"],
                 strings["Btn_Overlay"], strings["Btn_ChatBox"]);
 
-            ReopenHintText.Text = string.Format(strings["Welcome_ReopenHint"], strings["Lbl_QuickStart"]);
+            ReopenHintText.Text = string.Format(strings["Welcome_ReopenHint"], strings["Lbl_QuickStart"], strings["Main_More"]);
 
             bool hasWindow = MainWindow.Instance.IsCapturingGameWindow;
             SelectedWindowText.Text = hasWindow
@@ -163,13 +177,7 @@ namespace AlpWareStudio.Localay
             if (_isLoading || InterfaceLanguageComboBox.SelectedItem is not ComboBoxItem { Tag: string languageCode })
                 return;
 
-            // Select it on the main window so its handler applies and saves the change exactly as usual
-            var mainItem = MainWindow.Instance.languageSelector.Items.OfType<ComboBoxItem>()
-                .FirstOrDefault(item => item.Tag as string == languageCode);
-            if (mainItem != null)
-            {
-                MainWindow.Instance.languageSelector.SelectedItem = mainItem;
-            }
+            ApplicationPreferences.SetLanguagePreference(languageCode);
         }
 
         private void SaveLanguages()

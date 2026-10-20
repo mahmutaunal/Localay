@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using Windows.Graphics;
@@ -72,50 +72,7 @@ namespace AlpWareStudio.Localay
 
                 _session = _framePool.CreateCaptureSession(_captureItem);
 
-                // Hide the yellow capture border (requires Windows 11 22H2+).
-                // We use COM interop (QueryInterface for IGraphicsCaptureSession3)
-                // instead of reflection because the 19041 SDK projection does not
-                // include the IsBorderRequired property, so GetProperty returns null.
-                // On older Windows (10 or 11 < 22H2), QueryInterface will return
-                // E_NOINTERFACE and the yellow border will remain visible —
-                // that is an OS limitation, not a bug.
-                try
-                {
-                    IntPtr unknown = Marshal.GetIUnknownForObject(_session);
-                    if (unknown != IntPtr.Zero)
-                    {
-                        try
-                        {
-                            Guid iid3 = typeof(IGraphicsCaptureSession3).GUID;
-                            int hr = Marshal.QueryInterface(unknown, in iid3, out IntPtr session3Ptr);
-                            if (hr == 0 && session3Ptr != IntPtr.Zero)
-                            {
-                                try
-                                {
-                                    var session3 = (IGraphicsCaptureSession3)Marshal.GetObjectForIUnknown(session3Ptr);
-                                    session3.put_IsBorderRequired(0); // 0 = false → hide border
-                                    Console.WriteLine("WGC: Yellow capture border disabled via IGraphicsCaptureSession3");
-                                }
-                                finally
-                                {
-                                    Marshal.Release(session3Ptr);
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine("WGC: IGraphicsCaptureSession3 not available (requires Windows 11 22H2+), yellow border will remain");
-                            }
-                        }
-                        finally
-                        {
-                            Marshal.Release(unknown);
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"WGC: Could not disable yellow border: {ex.Message}");
-                }
+                // Keep the Windows capture indicator visible.
 
                 // Exclude the mouse cursor from captured frames.
                 try { _session.IsCursorCaptureEnabled = false; } catch { }
@@ -208,28 +165,6 @@ namespace AlpWareStudio.Localay
             if (_disposed) return;
             _disposed = true;
             StopCapture();
-        }
-
-        // ═════════ IGraphicsCaptureSession3 (Windows 11 22H2+) ═════════
-        // This interface is not available in the 19041 SDK projection, so we
-        // define it manually to access IsBorderRequired (hide yellow border)
-        // without upgrading the target framework.
-        // GUID verified from Windows.Graphics.winmd: f2cdd966-22ae-5ea1-9596-3a289344c3be
-        [ComImport]
-        [Guid("F2CDD966-22AE-5EA1-9596-3A289344C3BE")]
-        [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-        private interface IGraphicsCaptureSession3
-        {
-            // IInspectable methods (vtable slots 3-5; IUnknown slots 0-2 are
-            // handled automatically by InterfaceIsIUnknown).
-            void GetIids(out uint iidCount, out IntPtr iids);
-            void GetRuntimeClassName(out IntPtr className);
-            void GetTrustLevel(out int trustLevel);
-
-            // IGraphicsCaptureSession3 methods (vtable slots 6-7).
-            // WinRT Boolean is a 1-byte value (0 = false, 1 = true).
-            void get_IsBorderRequired(out byte value);
-            void put_IsBorderRequired(byte value);
         }
 
         // ═════════ HWND → GraphicsCaptureItem interop ═════════

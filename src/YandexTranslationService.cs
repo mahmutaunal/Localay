@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
@@ -95,7 +95,7 @@ namespace AlpWareStudio.Localay
                         outputJson.WriteString("translated_text", translatedText);
                         outputJson.WriteEndObject();
 
-                        Console.WriteLine($"Yandex translated: '{originalText}' -> '{translatedText}'");
+                        LogManager.Instance.WriteContentLine($"Yandex translated: '{originalText}' -> '{translatedText}'");
                     }
                 }
 

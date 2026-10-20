@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -44,11 +44,11 @@ namespace AlpWareStudio.Localay
 
             var gotItButton = new Button
             {
-                Content = LocalizationManager.Instance.Strings["Coach_GotIt"],
                 HorizontalAlignment = HorizontalAlignment.Right,
                 Padding = new Thickness(10, 3, 10, 3),
                 Cursor = System.Windows.Input.Cursors.Hand
             };
+            UiText.Bind(gotItButton, ContentControl.ContentProperty, "Coach_GotIt");
             gotItButton.Click += (s, e) => Finish();
 
             var panel = new StackPanel();
@@ -77,6 +77,7 @@ namespace AlpWareStudio.Localay
             _window.Deactivated += Window_Deactivated;
             _window.Activated += Window_Activated;
             _window.StateChanged += Window_StateChanged;
+            LocalizationManager.Instance.PropertyChanged += LanguageChanged;
         }
 
         /// <summary>
@@ -88,13 +89,13 @@ namespace AlpWareStudio.Localay
                 return;
 
             Current = new CoachMarkTour(window);
-            Current.ShowStep(Step.SelectArea);
+            Current.ShowStep(window.hasSelectedTranslationArea || window.IsCapturingGameWindow ? Step.Start : Step.SelectArea);
         }
 
         /// <summary>
-        /// Call when a translation area has been selected (selecting the game window alone does not count).
+        /// Call when a translation area or an application window has been selected.
         /// </summary>
-        public void OnAreaChosen()
+        public void OnCaptureChosen()
         {
             if (_step == Step.SelectArea)
             {
@@ -144,7 +145,7 @@ namespace AlpWareStudio.Localay
                     _popup.PlacementTarget = _window.selectAreaButton;
                     break;
                 case Step.Start:
-                    _message.Text = string.Format(strings["Coach_Start"], strings["Btn_Start"], config.GetHotKey("Start/Stop"));
+                    _message.Text = string.Format(strings["Coach_Start"], strings["Main_Start"], config.GetHotKey("Start/Stop"));
                     _popup.PlacementTarget = _window.toggleButton;
                     break;
                 case Step.ShowResult:
@@ -157,6 +158,7 @@ namespace AlpWareStudio.Localay
             _popup.IsOpen = false;
             if (IsWindowInFront)
             {
+                (_popup.PlacementTarget as FrameworkElement)?.BringIntoView();
                 _popup.IsOpen = true;
             }
             else if (step != Step.SelectArea)
@@ -193,9 +195,15 @@ namespace AlpWareStudio.Localay
             _popup.IsOpen = IsWindowInFront;
         }
 
+        private void LanguageChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName == nameof(LocalizationManager.CurrentLanguage)) ShowStep(_step);
+        }
+
         private void Finish()
         {
             _popup.IsOpen = false;
+            LocalizationManager.Instance.PropertyChanged -= LanguageChanged;
             _window.LocationChanged -= Window_LocationChanged;
             _window.Deactivated -= Window_Deactivated;
             _window.Activated -= Window_Activated;

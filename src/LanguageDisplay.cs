@@ -1,70 +1,34 @@
-﻿using System;
+using System;
 using System.Globalization;
+using System.Windows;
 using System.Windows.Data;
 
 namespace AlpWareStudio.Localay
 {
-    // Readable names for the app's OCR/translation language codes (ja, en, ch_sim, ...)
     public static class LanguageDisplay
     {
-        // "Japanese — 日本語 (ja)"
-        public static string GetDisplayName(string code)
+        public static string GetDisplayName(string code) => $"{GetShortName(code)} ({code})";
+
+        public static string GetShortName(string code)
         {
-            CultureInfo? culture = GetCulture(code);
-            if (culture == null)
-                return code;
-
-            return culture.NativeName == culture.EnglishName
-                ? $"{culture.EnglishName} ({code})"
-                : $"{culture.EnglishName} — {culture.NativeName} ({code})";
-        }
-
-        // "Japanese"
-        public static string GetShortName(string code) => GetCulture(code)?.EnglishName ?? code;
-
-        private static CultureInfo? GetCulture(string code)
-        {
-            // The app uses its own codes for Chinese
-            string cultureName = code.ToLowerInvariant() switch
-            {
-                "ch_sim" => "zh-Hans",
-                "ch_tra" => "zh-Hant",
-                _ => code
-            };
-
-            try
-            {
-                CultureInfo culture = CultureInfo.GetCultureInfo(cultureName);
-                // Show "Bulgarian" rather than "Bulgarian (Bulgaria)" for region-specific codes like bg-BG
-                if (!culture.IsNeutralCulture && !Equals(culture.Parent, CultureInfo.InvariantCulture))
-                {
-                    culture = culture.Parent;
-                }
-                return culture;
-            }
-            catch (CultureNotFoundException)
-            {
-                return null;
-            }
+            string key = "Language_" + code.ToLowerInvariant().Replace('-', '_');
+            string name = LocalizationManager.Instance[key];
+            return name == $"[{key}]" ? code : name;
         }
     }
 
-    // Shows a language code as its display name; the bound value stays the code
-    public class LanguageCodeToNameConverter : IValueConverter
+    // The second binding is the UI language; it refreshes names without changing stored codes.
+    public class LanguageCodeToNameConverter : IValueConverter, IMultiValueConverter
     {
         public bool ShortName { get; set; }
-
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
         {
-            string? code = value?.ToString();
-            if (string.IsNullOrEmpty(code))
-                return "";
-            return ShortName ? LanguageDisplay.GetShortName(code) : LanguageDisplay.GetDisplayName(code);
+            string? code = value == DependencyProperty.UnsetValue ? null : value?.ToString();
+            return string.IsNullOrEmpty(code) ? "" : ShortName ? LanguageDisplay.GetShortName(code) : LanguageDisplay.GetDisplayName(code);
         }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotSupportedException();
-        }
+        public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture) =>
+            Convert(values[0], targetType, parameter, culture);
+        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => throw new NotSupportedException();
+        public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) => throw new NotSupportedException();
     }
 }

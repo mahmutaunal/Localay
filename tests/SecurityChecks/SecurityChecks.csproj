@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <SecurityWindowsChecks Condition="'$(OS)' == 'Windows_NT'">true</SecurityWindowsChecks>
+    <OutputType>Exe</OutputType>
+    <TargetFramework Condition="'$(SecurityWindowsChecks)' == 'true'">net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework Condition="'$(SecurityWindowsChecks)' != 'true'">net10.0</TargetFramework>
+    <UseWPF Condition="'$(SecurityWindowsChecks)' == 'true'">true</UseWPF>
+    <RuntimeIdentifier Condition="'$(SecurityWindowsChecks)' == 'true'">win-x64</RuntimeIdentifier>
+    <SelfContained Condition="'$(SecurityWindowsChecks)' == 'true'">true</SelfContained>
+    <AssemblyName>Localay.SecurityChecks</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>NU1900;NU1901;NU1902;NU1903;NU1904;NU1905</WarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SecurityWindowsChecks)' == 'true'">
+    <ProjectReference Include="../../Localay.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(SecurityWindowsChecks)' != 'true'">
+    <Compile Include="../../src/ConfigFileSecurity.cs" Link="ConfigFileSecurity.cs" />
+    <Compile Include="../../src/CredentialRedactor.cs" Link="CredentialRedactor.cs" />
+    <Compile Include="../../src/AppPaths.cs" Link="AppPaths.cs" />
+    <Compile Include="../../src/AppRestart.cs" Link="AppRestart.cs" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+</Project>

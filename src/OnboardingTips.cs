@@ -1,4 +1,4 @@
-﻿namespace AlpWareStudio.Localay
+namespace AlpWareStudio.Localay
 {
     /// <summary>
     /// Contextual hints shown when a user is likely stuck: started without choosing an area,
@@ -96,7 +96,7 @@
 
             if (showFailureTip)
             {
-                Show("Tip_TranslationFailed_Title", Format("Tip_TranslationFailed_Message", service, S("Btn_Settings")));
+                Show("Tip_TranslationFailed_Title", Format("Tip_TranslationFailed_Message", UiText.Service(service), S("Btn_Settings")));
             }
 
             if (succeeded)

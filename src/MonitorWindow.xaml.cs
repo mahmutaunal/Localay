@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -77,6 +77,8 @@ namespace AlpWareStudio.Localay
             Console.WriteLine("MonitorWindow constructor: Setting _isInitializing to true");
 
             InitializeComponent();
+            foreach (var item in ocrMethodComboBox.Items.OfType<System.Windows.Controls.ComboBoxItem>())
+                if (item.Content?.ToString() == "OneOCR") item.IsEnabled = NativeOcrAssets.IsAvailable;
 
             Console.WriteLine("MonitorWindow constructor started");
             this.Topmost = true;
@@ -88,7 +90,7 @@ namespace AlpWareStudio.Localay
             //Logic.Instance.TextObjectAdded += CreateMonitorOverlayFromTextObject;
 
             // Set initial status
-            UpdateStatus("Ready");
+            UpdateStatus("Status_Ready");
 
             // Add loaded event handler
             this.Loaded += MonitorWindow_Loaded;
@@ -211,7 +213,7 @@ namespace AlpWareStudio.Localay
             // Clear any existing text objects
             Logic.Instance.ClearAllTextObjects();
             
-            UpdateStatus($"Using {ocrMethod} (built-in)");
+            UpdateStatus("Status_UsingBuiltInOcr", ocrMethod);
 
             // Sync the OCR method selection with MainWindow
             if (MainWindow.Instance != null)
@@ -413,7 +415,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error updating screenshot from bitmap: {ex.Message}");
-                UpdateStatus($"Error: {ex.Message}");
+                UpdateStatus("Msg_UnexpectedError", ex.Message);
             }
         }
         
@@ -523,7 +525,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error adding text to monitor: {ex.Message}");
-                UpdateStatus($"Error adding text overlay: {ex.Message}");
+                UpdateStatus("Msg_OverlayError", ex.Message);
             }
         }
         
@@ -553,7 +555,7 @@ namespace AlpWareStudio.Localay
             
             // Update zoom textbox
             zoomTextBox.Text = ((int)(currentZoom * 100)).ToString();
-            UpdateStatus($"Zoom: {(int)(currentZoom * 100)}%");
+            UpdateStatus("Status_Zoom", (int)(currentZoom * 100));
             Console.WriteLine($"Zoom level changed to {(int)(currentZoom * 100)}%");
         }
         
@@ -784,19 +786,19 @@ namespace AlpWareStudio.Localay
         }
         
         // Update status message
-        private void UpdateStatus(string message)
+        private void UpdateStatus(string key, params object[] args)
         {
             // Check if we need to invoke on the UI thread
             if (!Dispatcher.CheckAccess())
             {
                 // We're on a background thread, marshal the call to the UI thread
-                Dispatcher.Invoke(() => UpdateStatus(message));
+                Dispatcher.Invoke(() => UpdateStatus(key, args));
                 return;
             }
             
             // Now we're on the UI thread, safe to update
             if (statusText != null)
-                statusText.Text = message;
+                UiText.Bind(statusText, TextBlock.TextProperty, key, args);
         }
         
         // Initialize the translation status timer
@@ -815,7 +817,7 @@ namespace AlpWareStudio.Localay
             
             Dispatcher.Invoke(() =>
             {
-                translationStatusLabel.Text = $"Waiting for {service}... {elapsed.Minutes:D1}:{elapsed.Seconds:D2}";
+                UiText.Bind(translationStatusLabel, TextBlock.TextProperty, "Status_WaitingServiceTimer", service, (int)elapsed.TotalMinutes, elapsed.Seconds);
             });
         }
 
@@ -827,7 +829,7 @@ namespace AlpWareStudio.Localay
             {
                 Dispatcher.Invoke(() =>
                 {
-                    translationStatusLabel.Text = $"Settling...";
+                    UiText.Bind(translationStatusLabel, TextBlock.TextProperty, "Status_Settling");
                     if (ConfigManager.Instance.IsShowIconSignalEnabled())
                     {
                         translationStatusBorder.Visibility = Visibility.Visible;
@@ -847,7 +849,7 @@ namespace AlpWareStudio.Localay
 
             Dispatcher.Invoke(() =>
             {
-                translationStatusLabel.Text = $"Waiting for {service}... 0:00";
+                UiText.Bind(translationStatusLabel, TextBlock.TextProperty, "Status_WaitingServiceTimer", service, 0, 0);
                 if (ConfigManager.Instance.IsShowIconSignalEnabled())
                 {
                     translationStatusBorder.Visibility = Visibility.Visible;
@@ -997,7 +999,7 @@ namespace AlpWareStudio.Localay
                 UpdateScrollViewerSettings();
                 
                 // Update status
-                UpdateStatus($"Zoom: {value}%");
+                UpdateStatus("Status_Zoom", value);
                 Console.WriteLine($"Zoom level changed to {value}%");
             }
             else
@@ -1012,7 +1014,7 @@ namespace AlpWareStudio.Localay
                 imageContainer.LayoutTransform = scaleTransform;
                 
                 // Update status
-                UpdateStatus("Zoom reset to default (100%)");
+                UpdateStatus("Status_ZoomReset");
             }
         }
         

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -191,7 +191,7 @@ namespace AlpWareStudio.Localay
                         return await TranslateAsync(jsonData, prompt);
                     }
                     _consecutiveFailures++;
-                    Console.WriteLine($"Gemini API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
+                    LogManager.Instance.WriteContentLine($"Gemini API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
 
                     // Check if we should switch API key
                     if (ShouldSwitchApiKey(response.StatusCode, errorMessage))
@@ -203,7 +203,7 @@ namespace AlpWareStudio.Localay
                             if (!string.IsNullOrEmpty(newApikey) && newApikey != apiKey)
                             {
                                 ConfigManager.Instance.SetGeminiApiKey(newApikey);
-                                Console.WriteLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
+                                LogManager.Instance.WriteContentLine($"Switched API key from {MaskApiKey(apiKey)} to {MaskApiKey(newApikey)}");
                                 _retryCount++;
                             }
                             else
@@ -236,7 +236,7 @@ namespace AlpWareStudio.Localay
                             if (_consecutiveFailures > 3)
                             {
                                 // Write error to file
-                                System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
+                                LogManager.Instance.WriteDiagnostic("gemini_last_error.txt", $"Gemini API error: {detailedError}\n\nResponse code: {response.StatusCode}\nFull response: {errorMessage}");
 
                                 // Show error message to user
                                 TranslationErrorNotifier.ShowOnce("Gemini",
@@ -254,7 +254,7 @@ namespace AlpWareStudio.Localay
                     if (_consecutiveFailures > 3)
                     {
                         // Write error to file
-                        System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {response.StatusCode}\n\nFull response: {errorMessage}");
+                        LogManager.Instance.WriteDiagnostic("gemini_last_error.txt", $"Gemini API error: {response.StatusCode}\n\nFull response: {errorMessage}");
 
                         // Show general error if JSON parsing failed
                         TranslationErrorNotifier.ShowOnce("Gemini",
@@ -270,7 +270,7 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"Translation API error: {ex.Message}");
 
                 // Write error to file
-                System.IO.File.WriteAllText("gemini_last_error.txt", $"Gemini API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
+                LogManager.Instance.WriteDiagnostic("gemini_last_error.txt", $"Gemini API error: {ex.Message}\n\nStack trace: {ex.StackTrace}");
 
                 // Show error message to user
                 TranslationErrorNotifier.ShowOnce("Gemini",

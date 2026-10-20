@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net9.0-windows10.0.19041.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -16,32 +16,37 @@
     <RootNamespace>AlpWareStudio.Localay</RootNamespace>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
-    <ApplicationIcon>media\AppIcon.ico</ApplicationIcon>
+    <ApplicationIcon>assets\localay.ico</ApplicationIcon>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <!-- Keep a portable multi-file layout for the native OCR library. -->
     <PublishSingleFile>false</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NuGetAudit>true</NuGetAudit>
+    <NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>$(WarningsAsErrors);NU1900;NU1901;NU1902;NU1903;NU1904;NU1905</WarningsAsErrors>
+    <IncludeOneOcrAssets Condition="'$(IncludeOneOcrAssets)' == ''">false</IncludeOneOcrAssets>
 
-    <!-- Assembly metadata — helps AV heuristics identify the binary as legitimate -->
+    <!-- Product identity for file properties; this is not a trust or AV exemption. -->
     <Version>1.0.0</Version>
-    <FileVersion>1.0.0.0</FileVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>$(Version).0</FileVersion>
+    <AssemblyVersion>$(Version).0</AssemblyVersion>
     <Company>AlpWare Studio</Company>
     <Product>Localay</Product>
-    <Authors>AlpWare Studio and Localay contributors</Authors>
+    <Authors>AlpWare Studio</Authors>
     <Description>Real-time game localization for Windows</Description>
     <AssemblyTitle>Localay</AssemblyTitle>
     <Copyright>Copyright © 2026 AlpWare Studio. Based on RSTGameTranslation (GPL-3.0).</Copyright>
 
-    <!-- Include PDB for deterministic builds — AV engines trust binaries with debug info -->
+    <!-- Portable symbols support diagnostics. -->
     <DebugType>portable</DebugType>
     <DebugSymbols>true</DebugSymbols>
 
-    <!-- Deterministic build — identical source always produces identical binary (improves AV trust) -->
+    <!-- Reproducibility with the same sources, toolchain, inputs and paths. -->
     <Deterministic>true</Deterministic>
 
-    <!-- Disable IL trimming to avoid AV heuristic false-positives from trimmed assemblies -->
+    <!-- WPF and native/WinRT interop require an untrimmed deployment. -->
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
 
@@ -52,7 +57,8 @@
   <ItemGroup>
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="System.Management" Version="7.0.1" />
+    <PackageReference Include="System.Management" Version="10.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
   
   <ItemGroup>
@@ -62,11 +68,22 @@
     <Page Include="src\**\*.xaml" Exclude="src\App.xaml" />
     <None Include="app.manifest" />
     <None Update="app\Languages\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="Languages\%(Filename)%(Extension)" />
-    <None Update="app\OneOcr\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
+    <None Condition="'$(IncludeOneOcrAssets)' == 'true'" Update="app\OneOcr\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" />
   </ItemGroup>
   
   <ItemGroup>
-    <Resource Include="media\AppIcon.ico" />
+    <Resource Include="assets\localay.ico" />
+    <EmbeddedResource Include="LICENSE.md" LogicalName="Localay.Licenses.LICENSE.md" />
+    <EmbeddedResource Include="THIRD_PARTY_NOTICES.md" LogicalName="Localay.Licenses.THIRD_PARTY_NOTICES.md" />
   </ItemGroup>
 
+  <ItemGroup Condition="'$(IncludeOneOcrAssets)' == 'true'">
+    <None Update="security\ONEOCR-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" TargetPath="ONEOCR-LICENSE.txt" />
+  </ItemGroup>
+  <Target Name="RemoveUnapprovedNativeAssets" BeforeTargets="PrepareForBuild" Condition="'$(IncludeOneOcrAssets)' != 'true'">
+    <Delete Files="$(OutputPath)oneocr.dll;$(OutputPath)oneocr.onemodel;$(OutputPath)ONEOCR-LICENSE.txt" />
+  </Target>
+  <Target Name="RequireOneOcrLicense" BeforeTargets="PrepareForBuild" Condition="'$(IncludeOneOcrAssets)' == 'true'">
+    <Error Condition="!Exists('security/ONEOCR-LICENSE.txt')" Text="OneOCR redistribution is disabled until security/ONEOCR-LICENSE.txt documents your redistribution permission. Use the default Windows OCR build." />
+  </Target>
 </Project>

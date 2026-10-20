@@ -15,9 +15,12 @@ namespace AlpWareStudio.Localay;
 public partial class App : Application
 {
     private MainWindow? _mainWindow;
+    // Keep this marker alive until the process exits so Setup/Uninstall cannot replace in-use files.
+    private static System.Threading.Mutex? _runningMarker;
 
     public App()
     {
+        Console.SetOut(new RedactingTextWriter(Console.Out));
         // Register the earliest possible exception handler to catch assembly load failures,
         // TypeInitializationExceptions, and other fatal errors that happen before OnStartup.
         AppDomain.CurrentDomain.UnhandledException += (sender, args) =>
@@ -45,7 +48,7 @@ public partial class App : Application
     {
         try
         {
-            string logPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_log.txt");
+            string logPath = Path.Combine(AppPaths.LogDirectory, "crash_log.txt");
             string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             string entry = $"[{timestamp}] {context}\n" +
                            $"  Exception: {ex.GetType().FullName}: {ex.Message}\n" +
@@ -58,7 +61,7 @@ public partial class App : Application
                          $"  Inner Stack: {ex.InnerException.StackTrace}\n";
             }
             entry += "\n";
-            File.AppendAllText(logPath, entry);
+            File.AppendAllText(logPath, CredentialRedactor.Redact(entry));
         }
         catch { /* last resort — nothing we can do */ }
     }
@@ -69,18 +72,20 @@ public partial class App : Application
         // Without this, the app silently exits on systems where WinRT components are missing.
         try
         {
+            if (AppRestart.RunHelper(e.Args) is int helperExitCode)
+            {
+                Shutdown(helperExitCode);
+                return;
+            }
             StartupCore(e);
         }
         catch (Exception ex)
         {
             WriteCrashLog("OnStartup", ex);
             System.Windows.MessageBox.Show(
-                $"Localay failed to start.\n\n" +
-                $"{ex.GetType().Name}: {ex.Message}\n\n" +
-                $"A crash log has been written to:\n" +
-                $"{Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "crash_log.txt")}\n\n" +
-                $"Please report this issue.",
-                "Localay — Startup Error",
+                UiText.Format("Msg_StartupError", $"{ex.GetType().Name}: {ex.Message}",
+                    Path.Combine(AppPaths.LogDirectory, "crash_log.txt")),
+                UiText.Get("Title_StartupError"),
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
             Shutdown(1);
@@ -89,16 +94,18 @@ public partial class App : Application
 
     private void StartupCore(StartupEventArgs e)
     {
+        _runningMarker = new System.Threading.Mutex(false, "Local\\AlpWareStudio.Localay.Running");
         base.OnStartup(e);
+
+        ApplicationPreferences.CaptureSystemCulture();
 
         // Force invariant culture for all threads to prevent locale-dependent
         // number formatting (e.g. comma vs period decimal separator) from
         // corrupting config values and other serialized data.
         CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
         CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
+        ApplicationPreferences.Initialize();
 
-        // Apply theme
-        ThemeManager.ApplyTheme(ConfigManager.Instance.IsDarkModeEnabled());
 
         // Set up application-wide keyboard handling
         this.DispatcherUnhandledException += App_DispatcherUnhandledException;
@@ -121,7 +128,6 @@ public partial class App : Application
 
         // We'll attach the keyboard handlers when the windows are loaded
         // Each window now has its own Application_KeyDown method attached to PreviewKeyDown
-        LocalizationManager.Instance.CurrentLanguage = ConfigManager.Instance.GetLanguageInterface();
 
         // Add event handler to show main window after splash closes
         SplashManager.Instance.SplashClosed += (sender, args) =>
@@ -209,6 +215,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        ApplicationPreferences.Stop();
         base.OnExit(e);
 
         // The windows are gone, but a thread still running (native audio/OCR/TTS code, a library's
@@ -269,17 +276,12 @@ public partial class App : Application
         }
         catch (Exception ex)
         {
-            System.Windows.MessageBox.Show($"Failed to restart application: {ex.Message}",
-                "Restart Failed", MessageBoxButton.OK, MessageBoxImage.Error);
+            System.Windows.MessageBox.Show(UiText.Get("Msg_RestartFailed") + "\n\n" + UiText.Format("Msg_UnexpectedError", ex.Message),
+                UiText.Get("Title_Error"), MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
 
-    /// <summary>
-    /// Closes the application and starts it again. The new instance is started only once this one has
-    /// exited: on the way out this one stops the OCR server on its port, which would otherwise hit the
-    /// server the new instance just started. The helper is started from this (elevated) process, so the
-    /// restart does not ask for elevation again.
-    /// </summary>
+    /// <summary>Restart after this process exits, without a shell or elevated helper.</summary>
     public static void RestartApplication()
     {
         if (!Application.Current.Dispatcher.CheckAccess())
@@ -287,34 +289,17 @@ public partial class App : Application
             Application.Current.Dispatcher.Invoke(RestartApplication);
             return;
         }
-
         try
         {
-            string? exePath = Environment.ProcessPath;
-            if (!string.IsNullOrEmpty(exePath))
-            {
-                static string Quote(string s) => "'" + s.Replace("'", "''") + "'";
-                string workingDir = Path.GetDirectoryName(exePath) ?? AppDomain.CurrentDomain.BaseDirectory;
-                string command = $"Wait-Process -Id {Environment.ProcessId} -Timeout 60 -ErrorAction SilentlyContinue; " +
-                                 $"Start-Process -FilePath {Quote(exePath)} -WorkingDirectory {Quote(workingDir)}";
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command \"{command}\"",
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                });
-            }
-            else
-            {
-                Console.WriteLine("Restart: could not determine the application path; closing only");
-            }
+            AppRestart.Schedule();
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Restart: could not schedule the new instance: {ex.Message}");
+            System.Windows.MessageBox.Show(
+                LocalizationManager.Instance["Msg_RestartFailed"] + "\n" + ex.Message,
+                "Localay", MessageBoxButton.OK, MessageBoxImage.Error);
+            return;
         }
-
         ShutdownApplication();
     }
 
@@ -323,7 +308,7 @@ public partial class App : Application
     /// </summary>
     /// <param name="message">Custom message to show in the confirmation dialog</param>
     /// <returns>True if restart was initiated, false if user cancelled</returns>
-    public static bool ConfirmAndRestartApplication(string message = "Application needs to restart to apply changes. Shutdown now?")
+    public static bool ConfirmAndRestartApplication(string? message = null)
     {
         // Make sure we're on the UI thread
         if (!Application.Current.Dispatcher.CheckAccess())
@@ -333,7 +318,7 @@ public partial class App : Application
                 new Func<string, bool>(ConfirmAndRestartApplication), message);
         }
 
-        var result = System.Windows.MessageBox.Show(message, "Shutdown Application",
+        var result = System.Windows.MessageBox.Show(message ?? UiText.Get("Msg_RestartRequired"), UiText.Get("Title_Shutdown"),
             MessageBoxButton.OK, MessageBoxImage.Warning);
 
         ShutdownApplication();

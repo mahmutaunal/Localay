@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Windows;
@@ -16,7 +16,7 @@ namespace AlpWareStudio.Localay
             InitializeComponent();
             
             _serviceType = serviceType;
-            Title = $"{_serviceType} API Keys";
+            UiText.Bind(this, Window.TitleProperty, "ApiKeys_ServiceTitle", _serviceType);
             
             // Populate the list with existing keys
             foreach (var key in apiKeys)
@@ -79,7 +79,7 @@ namespace AlpWareStudio.Localay
             if (_apiKeys.Count > 0)
             {
                 MessageBoxResult result = System.Windows.MessageBox.Show(
-                    string.Format(LocalizationManager.Instance.Strings["Msg_ConfirmRemoveAllKeys"], _serviceType), 
+                    string.Format(LocalizationManager.Instance.Strings["Msg_ConfirmRemoveAllKeys"], UiText.Service(_serviceType)),
                     LocalizationManager.Instance.Strings["Title_ConfirmRemoval"], 
                     MessageBoxButton.YesNo, 
                     MessageBoxImage.Warning);

@@ -2,9 +2,6 @@ using System;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Input;
-using System.Diagnostics;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace AlpWareStudio.Localay
 {
@@ -27,24 +24,7 @@ namespace AlpWareStudio.Localay
 
         #endregion
 
-        #region Global Keyboard Hook
-
-        // For global keyboard hook
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc callback, IntPtr hInstance, uint threadId);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        private static extern bool UnhookWindowsHookEx(IntPtr hInstance);
-
-        [DllImport("user32.dll")]
-        private static extern IntPtr CallNextHookEx(IntPtr idHook, int nCode, int wParam, IntPtr lParam);
-
-        [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        // For getting key state
-        [DllImport("user32.dll")]
-        private static extern short GetAsyncKeyState(int vKey);
+        #region Registered Global Hotkeys
 
         // For registering hotkeys
         [DllImport("user32.dll", SetLastError = true)]
@@ -58,21 +38,6 @@ namespace AlpWareStudio.Localay
         private const uint MOD_NOREPEAT = 0x4000;
         private const uint MOD_CONTROL = 0x0002;
         private const uint MOD_SHIFT = 0x0004;
-
-        private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        private const int WH_KEYBOARD_LL = 13;
-        private const int WM_KEYDOWN = 0x0100;
-        private const int WM_KEYUP = 0x0101;
-        private const int WM_SYSKEYDOWN = 0x0104;
-        private const int WM_SYSKEYUP = 0x0105;
-
-        // Virtual key codes
-        private const int VK_SHIFT = 0x10;
-        private const int VK_CONTROL = 0x11;
-        private const int VK_MENU = 0x12; // ALT key
-        private const int VK_LWIN = 0x5B;
-        private const int VK_RWIN = 0x5C;
 
         // Every hotkey-bound function: its config name (as used by ConfigManager.GetHotKey) and the event it raises.
         // The RegisterHotKey id of each entry is its index + 1.
@@ -102,27 +67,15 @@ namespace AlpWareStudio.Localay
 
         // Set while the Settings window is recording a new hotkey, so the keys reach it instead of firing actions
         private static volatile bool _suspended;
-        // Replaced as a whole on refresh (never mutated in place) so the polling thread can enumerate it safely
+        // Refreshed on the UI thread when settings change.
         private static volatile Dictionary<string, (uint modifiers, int vkCode)> _parsedHotkeys = new Dictionary<string, (uint, int)>();
 
-        private static LowLevelKeyboardProc _proc = HookCallback;
-        private static IntPtr _hookID = IntPtr.Zero;
-
-        // Window that owns the RegisterHotKey registrations
         private static IntPtr _mainWindowHandle = IntPtr.Zero;
+        private static readonly HashSet<int> _registeredHotkeys = new();
 
-        // Hotkey keys whose key-down was swallowed by the hook (vk -> tick of last key-down); used to ignore
-        // auto-repeat and swallow the matching key-up. Entries expire in case a key-up is never delivered
-        // (e.g. secure desktop switch), longer than the max keyboard repeat delay of 1s.
-        private static readonly Dictionary<int, long> _heldHotkeyKeys = new Dictionary<int, long>();
-        private const long HeldKeyExpiryMs = 1500;
         private static readonly object _hotkeyDispatchLock = new object();
         private static readonly Dictionary<string, DateTime> _lastHotkeyDispatchTimes = new Dictionary<string, DateTime>(StringComparer.OrdinalIgnoreCase);
         private static readonly TimeSpan _hotkeyDispatchThreshold = TimeSpan.FromMilliseconds(250);
-
-        // Key polling system for global hotkeys only
-        private static CancellationTokenSource? _pollingCts;
-        private static bool _isPolling = false;
 
         // Event for Multi selection area
         public static event EventHandler? SelectArea1Requested;
@@ -337,42 +290,7 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        // Set up global keyboard hook and hotkeys
-        public static void InitializeGlobalHook()
-        {
-            // Parse all hotkeys from config
-            RefreshHotkeys();
-
-            // Set up low-level keyboard hook
-            if (_hookID == IntPtr.Zero) // Only set if not already set
-            {
-                using (Process curProcess = Process.GetCurrentProcess())
-                using (ProcessModule curModule = curProcess.MainModule!)
-                {
-                    if (curModule != null)
-                    {
-                        _hookID = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName), 0);
-                        if (_hookID == IntPtr.Zero)
-                        {
-                            int errorCode = Marshal.GetLastWin32Error();
-                            Console.WriteLine($"Failed to set global keyboard hook. Error code: {errorCode}");
-                        }
-                        else
-                        {
-                            Console.WriteLine("Global keyboard hook initialized successfully");
-                        }
-                    }
-                }
-            }
-
-            // Without the hook, fall back to polling key states. When the hook is active polling is not
-            // needed: the hook sees every key first, and RegisterHotKey covers windows the hook can't see
-            // (e.g. an elevated game in the foreground).
-            if (_hookID == IntPtr.Zero)
-            {
-                StartKeyPolling();
-            }
-        }
+        public static void InitializeGlobalHotkeys() => ReloadHotkeys();
 
         // Set the main window handle for hotkey registration
         public static void SetMainWindowHandle(IntPtr mainWindowHandle)
@@ -388,10 +306,11 @@ namespace AlpWareStudio.Localay
 
         private static void RegisterConfiguredHotkeys()
         {
-            if (_mainWindowHandle == IntPtr.Zero || _suspended)
+            if (_mainWindowHandle == IntPtr.Zero)
                 return;
 
             UnregisterAllHotkeys();
+            if (_suspended || !ConfigManager.Instance.IsHotKeyEnabled()) return;
 
             for (int i = 0; i < _hotkeyFunctions.Length; i++)
             {
@@ -401,10 +320,9 @@ namespace AlpWareStudio.Localay
 
         private static void UnregisterAllHotkeys()
         {
-            for (int i = 0; i < _hotkeyFunctions.Length; i++)
-            {
-                UnregisterHotKey(_mainWindowHandle, i + 1);
-            }
+            foreach (int id in _registeredHotkeys)
+                UnregisterHotKey(_mainWindowHandle, id);
+            _registeredHotkeys.Clear();
         }
 
         private static void RegisterFunctionHotkey(string functionName, int hotkeyId)
@@ -416,6 +334,7 @@ namespace AlpWareStudio.Localay
 
                 if (RegisterHotKey(_mainWindowHandle, hotkeyId, modifiers, vkCode))
                 {
+                    _registeredHotkeys.Add(hotkeyId);
                     Console.WriteLine($"Registered {functionName} hotkey successfully");
                 }
                 else
@@ -469,7 +388,7 @@ namespace AlpWareStudio.Localay
         public static bool ProcessHotKey(IntPtr wParam)
         {
             int index = wParam.ToInt32() - 1;
-            return index >= 0 && index < _hotkeyFunctions.Length && InvokeHotkeyAction(_hotkeyFunctions[index].Name);
+            return _registeredHotkeys.Contains(index + 1) && index >= 0 && index < _hotkeyFunctions.Length && InvokeHotkeyAction(_hotkeyFunctions[index].Name);
         }
 
         // Run the action bound to a hotkey function name
@@ -478,210 +397,10 @@ namespace AlpWareStudio.Localay
             return InvokeHotkeyAction(function);
         }
 
-        // Start polling for key states as a backup method - ONLY for global shortcuts
-        private static void StartKeyPolling()
+        public static void CleanupGlobalHotkeys()
         {
-            if (_isPolling)
-                return;
-
-            _isPolling = true;
-            _pollingCts = new CancellationTokenSource();
-            CancellationToken token = _pollingCts.Token;
-
-            Task.Run(async () =>
-            {
-                Console.WriteLine("Key polling started as backup method for global shortcuts");
-
-                // Tracks whether each hotkey was held on the previous tick, so we only fire on the press edge
-                Dictionary<string, bool> keyStates = new Dictionary<string, bool>();
-
-                try
-                {
-                    while (!token.IsCancellationRequested)
-                    {
-                        // Polling keeps running while hotkeys are disabled so re-enabling them works without a restart
-                        if (!_suspended && ConfigManager.Instance.IsHotKeyEnabled())
-                        {
-                            uint? currentModifiers = GetCurrentModifiers();
-
-                            foreach (var kvp in _parsedHotkeys)
-                            {
-                                string function = kvp.Key;
-                                var (modifiers, vkCode) = kvp.Value;
-
-                                bool isHotkeyPressed = currentModifiers == modifiers && IsKeyPressed(vkCode);
-                                keyStates.TryGetValue(function, out bool wasPressed);
-
-                                // If the hotkey state changed from not pressed to pressed
-                                if (isHotkeyPressed && !wasPressed)
-                                {
-                                    Console.WriteLine($"Polling detected: {function} hotkey");
-                                    DispatchHotkey(function);
-                                }
-
-                                keyStates[function] = isHotkeyPressed;
-                            }
-                        }
-
-                        // Sleep to reduce CPU usage
-                        await Task.Delay(30, token);
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    // Normal cancellation
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error in key polling: {ex.Message}");
-                }
-                finally
-                {
-                    _isPolling = false;
-                    Console.WriteLine("Key polling stopped");
-                }
-            }, token);
-        }
-
-        // Run the hotkey action asynchronously on the UI thread. Never block the caller: the low-level
-        // hook is silently removed by Windows if its callback exceeds LowLevelHooksTimeout.
-        private static void DispatchHotkey(string function)
-        {
-            try
-            {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    try
-                    {
-                        ProcessHandleHotKey(function);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"Error invoking {function} action: {ex.Message}");
-                    }
-                }));
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error dispatching {function} action: {ex.Message}");
-            }
-        }
-
-        // Currently held Alt/Ctrl/Shift as MOD_* flags, or null when a Windows key is held
-        // (Win combos are never configured, so they must not trigger a hotkey)
-        private static uint? GetCurrentModifiers()
-        {
-            if (IsKeyPressed(VK_LWIN) || IsKeyPressed(VK_RWIN))
-                return null;
-
-            uint modifiers = 0;
-            if (IsKeyPressed(VK_MENU))
-                modifiers |= MOD_ALT;
-            if (IsKeyPressed(VK_CONTROL))
-                modifiers |= MOD_CONTROL;
-            if (IsKeyPressed(VK_SHIFT))
-                modifiers |= MOD_SHIFT;
-            return modifiers;
-        }
-
-        // Stop the key polling
-        private static void StopKeyPolling()
-        {
-            if (_isPolling && _pollingCts != null)
-            {
-                _pollingCts.Cancel();
-                _pollingCts.Dispose();
-                _pollingCts = null;
-            }
-        }
-
-        // Remove the hook and unregister hotkeys
-        public static void CleanupGlobalHook()
-        {
-            // Stop key polling
-            StopKeyPolling();
-
-            // Unregister hotkeys
-            if (_mainWindowHandle != IntPtr.Zero)
-            {
-                UnregisterAllHotkeys();
-            }
-
-            // Remove low-level keyboard hook
-            if (_hookID != IntPtr.Zero)
-            {
-                UnhookWindowsHookEx(_hookID);
-                _hookID = IntPtr.Zero;
-                Console.WriteLine("Global keyboard hook removed");
-            }
-        }
-
-        // Direct key state check for more reliable detection
-        private static bool IsKeyPressed(int vkCode)
-        {
-            return (GetAsyncKeyState(vkCode) & 0x8000) != 0;
-        }
-
-        // Keyboard hook callback
-        private static IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-        {
-            try
-            {
-                if (nCode >= 0)
-                {
-                    int vkCode = Marshal.ReadInt32(lParam);
-                    bool isKeyDown = wParam == (IntPtr)WM_KEYDOWN || wParam == (IntPtr)WM_SYSKEYDOWN;
-                    bool isKeyUp = wParam == (IntPtr)WM_KEYUP || wParam == (IntPtr)WM_SYSKEYUP;
-
-                    if (isKeyUp && _heldHotkeyKeys.Remove(vkCode))
-                    {
-                        // The key-down was swallowed, so swallow the key-up too to avoid an orphan key-up in the game
-                        return (IntPtr)1;
-                    }
-
-                    if (isKeyDown)
-                    {
-                        // Auto-repeat of a hotkey we already handled: keep swallowing, but don't fire again
-                        long now = Environment.TickCount64;
-                        if (_heldHotkeyKeys.TryGetValue(vkCode, out long lastDown))
-                        {
-                            if (now - lastDown < HeldKeyExpiryMs)
-                            {
-                                _heldHotkeyKeys[vkCode] = now;
-                                return (IntPtr)1;
-                            }
-                            _heldHotkeyKeys.Remove(vkCode);
-                        }
-
-                        if (!_suspended && ConfigManager.Instance.IsHotKeyEnabled())
-                        {
-                            uint? currentModifiers = GetCurrentModifiers();
-
-                            foreach (var kvp in _parsedHotkeys)
-                            {
-                                var (modifiers, keyCode) = kvp.Value;
-
-                                // Modifiers must match exactly, so e.g. Ctrl+Alt+G does not trigger Alt+G
-                                if (vkCode == keyCode && currentModifiers == modifiers)
-                                {
-                                    Console.WriteLine($"Global shortcut detected: {kvp.Key}");
-                                    _heldHotkeyKeys[vkCode] = now;
-                                    DispatchHotkey(kvp.Key);
-                                    return (IntPtr)1; // Prevent further processing
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Call the next hook in the chain
-                return CallNextHookEx(_hookID, nCode, (int)wParam, lParam);
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error in keyboard hook: {ex.Message}");
-                return CallNextHookEx(_hookID, nCode, (int)wParam, lParam);
-            }
+            if (_mainWindowHandle != IntPtr.Zero) UnregisterAllHotkeys();
+            _mainWindowHandle = IntPtr.Zero;
         }
 
         #endregion

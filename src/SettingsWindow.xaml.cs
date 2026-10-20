@@ -174,6 +174,12 @@ namespace AlpWareStudio.Localay
             Console.WriteLine("SettingsWindow constructor: Setting _isInitializing to true");
 
             InitializeComponent();
+            InitializeGeneralPreferences();
+            var languageTemplate = (DataTemplate)FindResource("SettingsLanguageTemplate");
+            foreach (var combo in new[] { sourceLanguageComboBox, targetLanguageComboBox })
+                foreach (var item in combo.Items.OfType<ComboBoxItem>()) item.ContentTemplate = languageTemplate;
+            foreach (var item in ocrMethodComboBox.Items.OfType<ComboBoxItem>())
+                if (item.Content?.ToString() == "OneOCR") item.IsEnabled = NativeOcrAssets.IsAvailable;
             _instance = this;
             InitializeHotkeyRows();
             LocalizationManager.Instance.PropertyChanged += (s, e) => MatchTypeOptions.ForEach(option => option.RefreshText());
@@ -185,16 +191,73 @@ namespace AlpWareStudio.Localay
 
             // Add Loaded event handler to ensure controls are initialized
             this.Loaded += SettingsWindow_Loaded;
+            IsVisibleChanged += (s, e) =>
+            {
+                if (IsVisible)
+                {
+                    RefreshGeneralPreferences();
+                    Dispatcher.BeginInvoke(() => DpiHelper.FitWindowToWorkArea(this), System.Windows.Threading.DispatcherPriority.Loaded);
+                }
+            };
+            ApplicationPreferences.Changed += (s, e) => { RefreshGeneralPreferences(); LoadAvailableScreens(); };
 
             // Set up closing behavior (hide instead of close)
             this.Closing += (s, e) =>
             {
                 e.Cancel = true;  // Cancel the close
+                // Moving focus commits text fields that save on LostFocus, including Escape/title-bar close.
+                closeSettingsButton.Focus();
                 StopHotkeyCapture();
                 this.Hide();      // Just hide the window
-                MainWindow.Instance.settingsButton.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb(108, 117, 125));
+                MainWindow.Instance.settingsButton.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "SurfaceBrush");
+                MainWindow.Instance.settingsButton.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "BorderBrush");
+                MainWindow.Instance.settingsButton.FontWeight = FontWeights.Normal;
             };
         }
+
+        private bool _syncingGeneralPreferences;
+
+        private void InitializeGeneralPreferences()
+        {
+            _syncingGeneralPreferences = true;
+            InterfaceLanguageOptions.Populate(interfaceLanguageComboBox);
+            _syncingGeneralPreferences = false;
+            RefreshGeneralPreferences();
+        }
+
+        internal static void RefreshGeneralPreferencesIfCreated() => _instance?.RefreshGeneralPreferences();
+
+        private void RefreshGeneralPreferences()
+        {
+            if (interfaceLanguageComboBox == null || appearanceComboBox == null) return;
+            _syncingGeneralPreferences = true;
+            try
+            {
+                InterfaceLanguageOptions.SelectPreference(interfaceLanguageComboBox, ApplicationPreferences.LanguagePreference);
+                SelectComboBoxItemByTag(appearanceComboBox, ApplicationPreferences.ThemePreference);
+            }
+            finally { _syncingGeneralPreferences = false; }
+        }
+
+        private void InterfaceLanguagePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_syncingGeneralPreferences || SelectedTag(interfaceLanguageComboBox) is not string code) return;
+            ApplicationPreferences.SetLanguagePreference(code);
+        }
+
+        private void AppearancePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_syncingGeneralPreferences || SelectedTag(appearanceComboBox) is not string theme) return;
+            MainWindow.Instance.ApplyThemePreference(theme);
+        }
+
+        private void QuickStartFromSettings_Click(object sender, RoutedEventArgs e)
+        {
+            Close(); // The existing closing handler hides this persistent window.
+            MainWindow.Instance.OpenQuickStart();
+        }
+
+        private void CloseSettings_Click(object sender, RoutedEventArgs e) => Close();
 
         // Reload setting for setting windows
         public void ReloadSetting()
@@ -204,6 +267,8 @@ namespace AlpWareStudio.Localay
             LoadAllProfile();
 
             SettingsWindow_Loaded(null, null);
+            ApplicationPreferences.Refresh();
+            RefreshGeneralPreferences();
         }
 
         // Show message for multi selection are
@@ -312,7 +377,7 @@ namespace AlpWareStudio.Localay
                     string screenInfo = $"{displayName} ({width} x {height})";
                     if (screen.Primary)
                     {
-                        screenInfo += " (Primary)";
+                        screenInfo += " (" + UiText.Get("Lbl_Primary") + ")";
                     }
 
                     // Create combo box item
@@ -327,22 +392,11 @@ namespace AlpWareStudio.Localay
                     Console.WriteLine($"Screen {i}: {displayName}, {width}x{height}, Primary: {screen.Primary}");
                 }
 
-                // Select the primary screen by default
-                for (int i = 0; i < screenComboBox.Items.Count; i++)
-                {
-                    if (screenComboBox.Items[i] is ComboBoxItem item &&
-                        item.Content.ToString()?.Contains("Primary") == true)
-                    {
-                        screenComboBox.SelectedIndex = i;
-                        break;
-                    }
-                }
-
-                // If no primary screen was found, select the first item
-                if (screenComboBox.SelectedIndex == -1 && screenComboBox.Items.Count > 0)
-                {
-                    screenComboBox.SelectedIndex = 0;
-                }
+                // Select by stored screen identity, never by a translated display label.
+                int selectedIndex = ConfigManager.Instance.GetSelectedScreenIndex();
+                if (selectedIndex < 0 || selectedIndex >= screens.Length)
+                    selectedIndex = Array.FindIndex(screens, screen => screen.Primary);
+                screenComboBox.SelectedIndex = selectedIndex >= 0 ? selectedIndex : screens.Length > 0 ? 0 : -1;
 
                 Console.WriteLine($"Loaded {screenComboBox.Items.Count} screens");
             }
@@ -529,7 +583,7 @@ namespace AlpWareStudio.Localay
                         Console.WriteLine($"Added new API key for {serviceType}");
 
                         MessageBox.Show(
-                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], serviceType),
+                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], UiText.Service(serviceType)),
                             LocalizationManager.Instance.Strings["Title_ApiKeyAdded"],
                             MessageBoxButton.OK,
                             MessageBoxImage.Information
@@ -602,7 +656,7 @@ namespace AlpWareStudio.Localay
                         Console.WriteLine($"Added new API key for {serviceType}");
 
                         MessageBox.Show(
-                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], serviceType),
+                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], UiText.Service(serviceType)),
                             LocalizationManager.Instance.Strings["Title_ApiKeyAdded"],
                             MessageBoxButton.OK,
                             MessageBoxImage.Information
@@ -621,7 +675,7 @@ namespace AlpWareStudio.Localay
                 else
                 {
                     MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_NoPasswordField"], serviceType),
+                        string.Format(LocalizationManager.Instance.Strings["Msg_NoPasswordField"], UiText.Service(serviceType)),
                         LocalizationManager.Instance.Strings["Title_ConfigurationError"],
                         MessageBoxButton.OK,
                         MessageBoxImage.Error
@@ -1749,6 +1803,8 @@ namespace AlpWareStudio.Localay
 
                 // Hide prompt template for Google Translate / Yandex / Microsoft
                 bool showPromptTemplate = !isGoogleTranslateSelected && !isYandexSelected && !isMicrosoftSelected;
+                promptOptionsExpander.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
+                modelSamplingExpander.Visibility = isOllamaSelected ? Visibility.Visible : Visibility.Collapsed;
 
                 // API key is only visible for Google Translate if Cloud API is selected
                 bool showGoogleTranslateApiKey = isGoogleTranslateSelected &&
@@ -2769,8 +2825,8 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error opening URL: {ex.Message}");
-                MessageBox.Show($"Unable to open URL: {url}\n\nError: {ex.Message}",
-                    "Error Opening URL", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show(UiText.Format("Msg_UnableToOpenUrl", url, ex.Message),
+                    UiText.Get("Title_Error"), MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
 
@@ -3136,7 +3192,7 @@ namespace AlpWareStudio.Localay
                     }
                     // Show status
                     statusUpdateGameProfile.Visibility = Visibility.Visible;
-                    statusUpdateGameProfile.Text = $"Create {profileName} successfully!";
+                    UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Created", profileName);
                     statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Green);
 
                     // Auto close status after 1.5 second
@@ -3182,7 +3238,7 @@ namespace AlpWareStudio.Localay
                         MainWindow.Instance.currentAreaIndex = -1;
                         // Show status
                         statusUpdateGameProfile.Visibility = Visibility.Visible;
-                        statusUpdateGameProfile.Text = $"Remove {profileName} successfully!";
+                        UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Removed", profileName);
                         statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Red);
 
                         // Auto close status after 1.5 second
@@ -3250,7 +3306,7 @@ namespace AlpWareStudio.Localay
                         }
                         // Show status
                         statusUpdateGameProfile.Visibility = Visibility.Visible;
-                        statusUpdateGameProfile.Text = $"Update {profileName} successfully!";
+                        UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Updated", profileName);
                         statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Orange);
 
                         // Auto close status after 1.5 second
@@ -3315,7 +3371,7 @@ namespace AlpWareStudio.Localay
                     }
                     // Show status
                     statusUpdateGameProfile.Visibility = Visibility.Visible;
-                    statusUpdateGameProfile.Text = $"Load {profileName} successfully!";
+                    UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Loaded", profileName);
                     statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Violet);
                     ReloadSetting();
 
@@ -3907,6 +3963,7 @@ namespace AlpWareStudio.Localay
         {
             bool enabled = hotKeyEnableCheckBox.IsChecked ?? true;
             ConfigManager.Instance.SetHotKeyEnable(enabled);
+            KeyboardShortcuts.ReloadHotkeys();
             Console.WriteLine($"Hot key enable set to {enabled}");
         }
 
@@ -3953,6 +4010,13 @@ namespace AlpWareStudio.Localay
             try
             {
                 bool enabled = clipboardAutoTranslateCheckBox.IsChecked ?? false;
+                if (enabled && MessageBox.Show(LocalizationManager.Instance["Msg_ClipboardPrivacy"],
+                    "Localay", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.No) != MessageBoxResult.Yes)
+                {
+                    clipboardAutoTranslateCheckBox.IsChecked = false;
+                    return;
+                }
+                ConfigManager.Instance.SetValue("clipboard_privacy_consent_v1", enabled ? "true" : "false");
                 ConfigManager.Instance.SetClipboardAutoTranslateEnabled(enabled);
                 Console.WriteLine($"Clipboard auto-translate enabled: {enabled}");
 
