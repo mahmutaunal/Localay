@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -11,7 +11,7 @@ namespace AlpWareStudio.Localay
     {
         // Shared across instances (a new service is created per translation) so connections are reused.
         // Local models can be slow, hence the long timeout.
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromMinutes(2) };
 
         /// <summary>
         /// Load the configured model into memory before the first translation. A request with a
@@ -24,7 +24,7 @@ namespace AlpWareStudio.Localay
             string model = ConfigManager.Instance.GetOllamaModel();
             string json = System.Text.Json.JsonSerializer.Serialize(new { model, keep_alive = "30m" });
             using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            using var response = await _httpClient.PostAsync(endpoint, content);
+            using var response = await _httpClient.PostAsync(endpoint, content, TranslationRequestContext.Cancellation);
             Console.WriteLine($"[WarmUp] Ollama: model '{model}' loaded in {timer.ElapsedMilliseconds} ms ({(int)response.StatusCode})");
         }
 
@@ -67,11 +67,11 @@ namespace AlpWareStudio.Localay
                 
                 Console.WriteLine($"Sending request to Ollama API at: {ollamaEndpoint}");
                 
-                HttpResponseMessage response = await _httpClient.PostAsync(ollamaEndpoint, content);
+                HttpResponseMessage response = await _httpClient.PostAsync(ollamaEndpoint, content, TranslationRequestContext.Cancellation);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     TranslationErrorNotifier.Reset("Ollama");
                     
                     // Log the raw Ollama response before any processing
@@ -153,6 +153,7 @@ namespace AlpWareStudio.Localay
                         }
                         catch (JsonException ex)
                         {
+                            TranslationRequestContext.ReportException(ex);
                             // If nested parsing fails, use the original response text
                             Console.WriteLine($"Could not parse nested JSON, using raw response: {ex.Message}");
                         }
@@ -182,6 +183,7 @@ namespace AlpWareStudio.Localay
                     }
                     catch (JsonException jex)
                     {
+                        TranslationRequestContext.ReportException(jex);
                         Console.WriteLine($"Error parsing Ollama response: {jex.Message}");
                         LogManager.Instance.WriteContentLine($"Raw response: {jsonResponse}");
                         return null;
@@ -189,7 +191,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    string errorMessage = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     LogManager.Instance.WriteContentLine($"Ollama API error: {response.StatusCode}, {errorMessage}");
                     
                     // Try to parse the error message from JSON if possible
@@ -223,6 +225,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Ollama API error: {ex.Message}");
             
                 // Show error message to user for other exceptions

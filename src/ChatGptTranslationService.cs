@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -109,7 +109,7 @@ namespace AlpWareStudio.Localay
         // so adding them in the constructor would append another User-Agent value on every call
         private static HttpClient CreateHttpClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+            var client = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(60) };
             client.DefaultRequestHeaders.Add("User-Agent", "WPFScreenCapture");
             return client;
         }
@@ -163,6 +163,7 @@ namespace AlpWareStudio.Localay
                 // Validate we have an API key
                 if (string.IsNullOrWhiteSpace(apiKey))
                 {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
                     Console.WriteLine("ChatGPT API key is missing. Please set it in the settings.");
                     return null;
                 }
@@ -240,8 +241,8 @@ namespace AlpWareStudio.Localay
                 request.Content = new StringContent(requestJson, Encoding.UTF8, "application/json");
 
                 // Send request to OpenAI API
-                var response = await _httpClient.SendAsync(request);
-                string responseContent = await response.Content.ReadAsStringAsync();
+                var response = await _httpClient.SendAsync(request, TranslationRequestContext.Cancellation);
+                string responseContent = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
 
                 // Check if request was successful
                 if (response.IsSuccessStatusCode)
@@ -326,6 +327,7 @@ namespace AlpWareStudio.Localay
                                 }
                                 catch (Exception ex)
                                 {
+                                    TranslationRequestContext.ReportException(ex);
                                     Console.WriteLine($"Failed to normalize JSON format: {ex.Message}");
                                 }
                             }
@@ -382,6 +384,7 @@ namespace AlpWareStudio.Localay
                                 }
                                 catch (Exception ex)
                                 {
+                                    TranslationRequestContext.ReportException(ex);
                                     Console.WriteLine($"Error parsing JSON response: {ex.Message}");
                                     // Not valid JSON, will handle as plain text below
                                 }
@@ -403,6 +406,7 @@ namespace AlpWareStudio.Localay
                     }
                     catch (Exception ex)
                     {
+                        TranslationRequestContext.ReportException(ex);
                         Console.WriteLine($"Error processing ChatGPT response: {ex.Message}");
                         return null;
                     }
@@ -450,6 +454,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error in ChatGptTranslationService.TranslateAsync: {ex.Message}");
                 return null;
             }

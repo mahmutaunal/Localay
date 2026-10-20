@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Text;
@@ -25,7 +25,7 @@ namespace AlpWareStudio.Localay
 
         private static HttpClient CreateHttpClient()
         {
-            var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var client = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(15) };
             client.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36");
             client.DefaultRequestHeaders.TryAddWithoutValidation("Origin", "https://translate.yandex.com");
             client.DefaultRequestHeaders.Referrer = new Uri("https://translate.yandex.com/");
@@ -65,6 +65,7 @@ namespace AlpWareStudio.Localay
                 outputJson.WritePropertyName("translations");
                 outputJson.WriteStartArray();
 
+                bool anyTranslated = false;
                 if (root.TryGetProperty("text_blocks", out JsonElement textBlocks))
                 {
                     foreach (JsonElement block in textBlocks.EnumerateArray())
@@ -88,6 +89,7 @@ namespace AlpWareStudio.Localay
                         }
 
                         string translatedText = await TranslateWithYandexAsync(originalText, sourceLanguage, targetLanguage);
+                        anyTranslated |= !string.IsNullOrWhiteSpace(translatedText);
 
                         outputJson.WriteStartObject();
                         outputJson.WriteString("id", blockId);
@@ -103,12 +105,14 @@ namespace AlpWareStudio.Localay
                 outputJson.WriteEndObject();
                 outputJson.Flush();
 
+                if (!anyTranslated) return null;
                 string result = Encoding.UTF8.GetString(memoryStream.ToArray());
                 Console.WriteLine($"Yandex final JSON result: {result.Substring(0, Math.Min(100, result.Length))}...");
                 return result;
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error in YandexTranslationService: {ex.Message}");
                 return null;
             }
@@ -144,36 +148,23 @@ namespace AlpWareStudio.Localay
 
                     if (translatableParts.Count == 0)
                     {
-                        return text;
+                        return "";
                     }
 
                     List<string> translatedBatch = await TranslateBatchWithYandexAsync(translatableParts, sourceLanguage, targetLanguage);
-                    if (translatedBatch.Count == 0)
+                    if (translatedBatch.Count != translatableParts.Count)
                     {
-                        return text;
+                        return "";
                     }
 
-                    var rebuiltParts = new string[originalParts.Length];
-                    for (int i = 0; i < originalParts.Length; i++)
-                    {
-                        int translatedIndex = partMap[i];
-                        if (translatedIndex < 0 || translatedIndex >= translatedBatch.Count)
-                        {
-                            rebuiltParts[i] = originalParts[i];
-                            continue;
-                        }
-
-                        string translatedPart = translatedBatch[translatedIndex];
-                        rebuiltParts[i] = string.IsNullOrWhiteSpace(translatedPart) ? originalParts[i] : translatedPart;
-                    }
-
-                    return string.Join(separator, rebuiltParts);
+                    var rebuilt = TranslationParts.Reassemble(partMap, translatedBatch);
+                    return rebuilt.Success ? rebuilt.Text : "";
                 }
 
                 string normalizedText = NormalizeText(text);
                 if (string.IsNullOrWhiteSpace(normalizedText))
                 {
-                    return text;
+                    return "";
                 }
 
                 List<string> translatedSingle = await TranslateBatchWithYandexAsync(new List<string> { normalizedText }, sourceLanguage, targetLanguage);
@@ -182,12 +173,13 @@ namespace AlpWareStudio.Localay
                     return translatedSingle[0];
                 }
 
-                return text;
+                return "";
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error translating text with Yandex: {ex.Message}");
-                return text;
+                return "";
             }
         }
 
@@ -229,14 +221,14 @@ namespace AlpWareStudio.Localay
                     new KeyValuePair<string, string>("fetchAbortTimeout", "500")
                 });
 
-                var response = await _httpClient.PostAsync(urlBuilder.ToString(), body);
+                var response = await _httpClient.PostAsync(urlBuilder.ToString(), body, TranslationRequestContext.Cancellation);
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"Yandex translate endpoint error: {response.StatusCode}");
                     return new List<string>();
                 }
 
-                string jsonResponse = await response.Content.ReadAsStringAsync();
+                string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                 using JsonDocument responseDoc = JsonDocument.Parse(jsonResponse);
                 var root = responseDoc.RootElement;
 
@@ -255,6 +247,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error in Yandex batch translation: {ex.Message}");
                 return new List<string>();
             }
@@ -275,14 +268,14 @@ namespace AlpWareStudio.Localay
             try
             {
                 string detectUrl = $"https://translate.yandex.net/api/v1/tr.json/detect?srv=browser_video_translation&text={HttpUtility.UrlEncode(text)}";
-                var response = await _httpClient.GetAsync(detectUrl);
+                var response = await _httpClient.GetAsync(detectUrl, TranslationRequestContext.Cancellation);
                 if (!response.IsSuccessStatusCode)
                 {
                     Console.WriteLine($"Yandex detect endpoint error: {response.StatusCode}");
                     return string.Empty;
                 }
 
-                string jsonResponse = await response.Content.ReadAsStringAsync();
+                string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                 using JsonDocument doc = JsonDocument.Parse(jsonResponse);
                 if (doc.RootElement.TryGetProperty("lang", out JsonElement langElement))
                 {
@@ -293,6 +286,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error detecting language with Yandex: {ex.Message}");
                 return string.Empty;
             }

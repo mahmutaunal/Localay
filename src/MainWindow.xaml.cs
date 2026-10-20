@@ -937,6 +937,8 @@ namespace AlpWareStudio.Localay
             RefreshWorkflowSummary();
             if (!hasSelectedTranslationArea) return;
 
+            Logic.Instance.ClearAllTextObjects();
+
             captureRect = new System.Drawing.Rectangle(
                 (int)selectedTranslationArea.X,
                 (int)selectedTranslationArea.Y,
@@ -1028,7 +1030,7 @@ namespace AlpWareStudio.Localay
             // Update capture rectangle and the initial selection summary.
             UpdateCaptureRect();
             RefreshWorkflowSummary();
-            SettingsWindow.Instance.ListHotKey_TextChanged();
+            SettingsWindow.RefreshMainWindowHotkeys();
 
             // Keep the version visible without an information card.
             AppVersion.Text = LocalizationManager.Instance.Strings["App_Version"] + " " + AppRelease.Version;
@@ -1301,8 +1303,7 @@ namespace AlpWareStudio.Localay
             if (!isStarted && method == "Windows OCR" &&
                 !WindowsOCRManager.Instance.CheckLanguagePackInstall(ConfigManager.Instance.GetSourceLanguage()))
             {
-                System.Windows.MessageBox.Show(LocalizationManager.Instance["Msg_WindowsOcrLanguageRequired"],
-                    "Localay", MessageBoxButton.OK, MessageBoxImage.Information);
+                OcrLanguageSetupWindow.ShowFor(this, ConfigManager.Instance.GetSourceLanguage());
                 return;
             }
             bool isReady = true;
@@ -1535,7 +1536,12 @@ namespace AlpWareStudio.Localay
         // Settings button toggle handler
         private void SettingsButton_Click(object sender, RoutedEventArgs e)
         {
-            ToggleSettingsWindow();
+            try { ToggleSettingsWindow(); }
+            catch (Exception ex)
+            {
+                SetResultButtonState(settingsButton, false);
+                SettingsWindowError.Show(this, ex);
+            }
         }
 
         // Remember the settings window position
@@ -1545,28 +1551,29 @@ namespace AlpWareStudio.Localay
         // Show/hide the settings window
         private void ToggleSettingsWindow()
         {
+            var window = SettingsWindow.Instance;
             // Check if settings window is visible
-            if (SettingsWindow.Instance.IsVisible)
+            if (window.IsVisible && window.WindowState != WindowState.Minimized)
             {
                 // Store current position before hiding
-                settingsWindowLeft = SettingsWindow.Instance.Left;
-                settingsWindowTop = SettingsWindow.Instance.Top;
+                settingsWindowLeft = window.Left;
+                settingsWindowTop = window.Top;
 
                 Console.WriteLine($"Saving settings position: {settingsWindowLeft}, {settingsWindowTop}");
 
-                SettingsWindow.Instance.Hide();
+                window.Hide();
                 Console.WriteLine("Settings window hidden");
                 SetResultButtonState(settingsButton, false);
             }
             else
             {
-                SettingsWindow.Instance.ReloadSetting();
+                window.ReloadSetting();
                 // Always use the remembered position if it has been set
                 if (settingsWindowLeft != -1 || settingsWindowTop != -1)
                 {
                     // Restore previous position
-                    SettingsWindow.Instance.Left = settingsWindowLeft;
-                    SettingsWindow.Instance.Top = settingsWindowTop;
+                    window.Left = settingsWindowLeft;
+                    window.Top = settingsWindowTop;
                     Console.WriteLine($"Restoring settings position to: {settingsWindowLeft}, {settingsWindowTop}");
                 }
                 else
@@ -1575,14 +1582,17 @@ namespace AlpWareStudio.Localay
                     double mainCenter = this.Left + this.ActualWidth / 2;
                     double mainTop = this.Top;
 
-                    SettingsWindow.Instance.Left = mainCenter;
-                    SettingsWindow.Instance.Top = mainTop;
+                    window.Left = mainCenter;
+                    window.Top = mainTop;
                     Console.WriteLine("No saved position, positioning settings window to the right");
                 }
 
-                SettingsWindow.Instance.Show();
-                Console.WriteLine($"Settings window shown at position {SettingsWindow.Instance.Left}, {SettingsWindow.Instance.Top}");
-                SetResultButtonState(settingsButton, true);
+                if (window.WindowState == WindowState.Minimized)
+                    window.WindowState = WindowState.Normal;
+                window.Show();
+                window.Activate();
+                Console.WriteLine($"Settings window shown at position {window.Left}, {window.Top}");
+                SetResultButtonState(settingsButton, window.IsVisible);
             }
         }
 
@@ -2791,6 +2801,7 @@ namespace AlpWareStudio.Localay
                 return;
             }
             // Clear all save selection areas
+            Logic.Instance.ClearAllTextObjects();
             savedTranslationAreas.Clear();
             hasSelectedTranslationArea = false;
             currentAreaIndex = -1;
@@ -2904,6 +2915,7 @@ namespace AlpWareStudio.Localay
         // capture, Windows 10 cannot, so there it is hidden until a window is selected again.
         private void StopWindowCapture(bool windowLost)
         {
+            Logic.Instance.ClearAllTextObjects();
             isCapturingWindow = false;
             capturedWindowHandle = IntPtr.Zero;
             capturedWindowTitle = string.Empty;
@@ -3026,6 +3038,7 @@ namespace AlpWareStudio.Localay
         {
             if (windowHandle != IntPtr.Zero)
             {
+                Logic.Instance.ClearAllTextObjects();
                 capturedWindowHandle = windowHandle;
                 capturedWindowTitle = windowTitle;
                 isCapturingWindow = true;
@@ -3362,7 +3375,9 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine($"[ClipboardTranslate] Calling TranslateTextImmediateAsync...");
 
                 // Perform translation
+                using var session = Logic.Instance.CaptureSession();
                 string? translatedText = await Logic.Instance.TranslateTextImmediateAsync(text);
+                session.ThrowIfStale();
 
                 LogManager.Instance.WriteContentLine($"[ClipboardTranslate] TranslateTextImmediateAsync returned: {(translatedText != null ? $"'{translatedText.Substring(0, Math.Min(50, translatedText.Length))}...'" : "null")}");
 
@@ -3396,6 +3411,10 @@ namespace AlpWareStudio.Localay
                         LocalizationManager.Instance.Strings["NotificationMessage_ClipboardError"]
                     );
                 }
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Clipboard translation discarded because its session changed.");
             }
             catch (Exception ex)
             {

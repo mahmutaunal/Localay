@@ -41,10 +41,10 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Write a crash log to a file in the app directory.
+    /// Write a redacted crash log to the per-user log directory.
     /// This is needed because the console may not exist yet when OnStartup fails.
     /// </summary>
-    private static void WriteCrashLog(string context, Exception ex)
+    internal static void WriteCrashLog(string context, Exception ex)
     {
         try
         {
@@ -60,7 +60,7 @@ public partial class App : Application
                          $"  Inner HRESULT: 0x{ex.InnerException.HResult:X8}\n" +
                          $"  Inner Stack: {ex.InnerException.StackTrace}\n";
             }
-            entry += "\n";
+            entry += CredentialRedactor.Redact(ex.ToString()) + "\n\n";
             File.AppendAllText(logPath, CredentialRedactor.Redact(entry));
         }
         catch { /* last resort — nothing we can do */ }

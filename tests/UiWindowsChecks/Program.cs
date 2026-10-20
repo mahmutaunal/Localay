@@ -78,6 +78,10 @@ internal static class Program
 
             CheckTemplate("MainWindow.xaml", "LanguageCodeTemplate", "LanguageNameConverter", "LanguageShortNameConverter");
             CheckTemplate("SettingsWindow.xaml", "SettingsLanguageTemplate", "SettingsLanguageNameConverter");
+            CheckSettingsWindow();
+            CheckSettingsError();
+            CheckOverlayTextLayout();
+            CheckOcrSetupGuide();
             var body = (FrameworkElement)about.Content;
             foreach (double width in new[] { 460d, 620d })
             {
@@ -97,6 +101,215 @@ internal static class Program
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    private static void CheckOcrSetupGuide()
+    {
+        static void Click(Button button)
+        {
+            Dispatcher.CurrentDispatcher.BeginInvoke(new Action(() => button.RaiseEvent(new RoutedEventArgs(Button.ClickEvent))));
+            Flush();
+        }
+        var snapshot = OcrLanguageSetup.Evaluate("en", []);
+        var completion = new TaskCompletionSource<OcrInstallOutcome>();
+        int installs = 0;
+        var guide = new OcrLanguageSetupWindow("en", () => snapshot, tag =>
+        {
+            Check(tag == "en-US", "OCR guide sends only its frozen source capability to the installer");
+            installs++;
+            return completion.Task;
+        });
+        try
+        {
+            guide.Show(); Flush();
+            var install = (Button)guide.FindName("ocrSetupInstall");
+            var recheck = (Button)guide.FindName("ocrSetupRecheck");
+            var result = (TextBlock)guide.FindName("ocrSetupResult");
+            Check(install.IsEnabled && recheck.IsEnabled, "missing OCR opens with install and recheck actions");
+            foreach (string language in new[] { "tr", "en" })
+            {
+                LocalizationManager.Instance.CurrentLanguage = language;
+                Flush();
+                Check(guide.Title == UiText.Get("OcrSetup_Title") &&
+                    ((TextBlock)guide.FindName("ocrSetupExplanation")).Text == UiText.Get("OcrSetup_Explanation"),
+                    "open OCR guide localizes display-language explanation: " + language);
+            }
+            Click(install);
+            Check(installs == 1 && !install.IsEnabled && !recheck.IsEnabled && result.Text == UiText.Get("OcrSetup_Installing"),
+                "install progress prevents duplicate clicks without blocking the window");
+            snapshot = OcrLanguageSetup.Evaluate("en", ["en-GB"]);
+            completion.SetResult(OcrInstallOutcome.Completed); Flush();
+            Check(!install.IsEnabled && recheck.IsEnabled && result.Text == UiText.Get("OcrSetup_Result_Completed"),
+                "installation success is confirmed by a fresh recognizer query");
+            Check(((TextBlock)guide.FindName("ocrSetupStatus")).Text.Contains("en-GB", StringComparison.Ordinal),
+                "guide identifies the usable regional recognizer");
+            snapshot = OcrLanguageSetup.Evaluate("en", [], querySucceeded: false);
+            Click(recheck);
+            Check(!install.IsEnabled && ((TextBlock)guide.FindName("ocrSetupStatus")).Text == UiText.Get("OcrSetup_Unavailable"),
+                "OCR activation failure is not shown as an installable missing package");
+        }
+        finally { guide.Close(); }
+
+        foreach (var outcome in new[] { OcrInstallOutcome.Pending, OcrInstallOutcome.RestartRequired, OcrInstallOutcome.Cancelled,
+            OcrInstallOutcome.Failed, OcrInstallOutcome.Unsupported, OcrInstallOutcome.Completed })
+        {
+            var window = new OcrLanguageSetupWindow("en", () => OcrLanguageSetup.Evaluate("en", []),
+                _ => Task.FromResult(outcome));
+            try
+            {
+                window.Show(); Flush();
+                Click((Button)window.FindName("ocrSetupInstall"));
+                string key = outcome == OcrInstallOutcome.Completed ? "OcrSetup_InstalledNotActive" : "OcrSetup_Result_" + outcome;
+                Check(((TextBlock)window.FindName("ocrSetupResult")).Text == UiText.Get(key),
+                    "OCR guide distinguishes pending/restart/failure from usable OCR: " + outcome);
+            }
+            finally { window.Close(); }
+        }
+        var unknown = new OcrLanguageSetupWindow("unmapped", () => OcrLanguageSetup.Evaluate("unmapped", []));
+        Check(!((Button)unknown.FindName("ocrSetupInstall")).IsEnabled && !((Button)unknown.FindName("ocrSetupCopy")).IsEnabled,
+            "unknown source languages cannot launch or copy an arbitrary install command");
+        unknown.Close();
+        var late = new TaskCompletionSource<OcrInstallOutcome>();
+        var closing = new OcrLanguageSetupWindow("en", () => OcrLanguageSetup.Evaluate("en", []), _ => late.Task);
+        closing.Show(); Flush(); Click((Button)closing.FindName("ocrSetupInstall"));
+        closing.Close(); late.SetResult(OcrInstallOutcome.Completed); Flush();
+        Check(late.Task.IsCompletedSuccessfully && !closing.IsVisible,
+            "closing the guide does not cancel an in-progress servicing operation or reopen a window");
+    }
+
+    private static void CheckOverlayTextLayout()
+    {
+        static TextObject Make(string source, string translated, double width, double height, double lineHeight,
+            double min = 10, double max = 68, bool autoSize = true)
+        {
+            var item = new TextObject(source, 0, 0, width, height, Brushes.White, Brushes.Black)
+            {
+                TextTranslated = translated,
+                OptionsOverride = new(autoSize, false, "Segoe UI", min, max)
+            };
+            item.BindCaptureGeometry(new(0, 0, width, height, lineHeight), 1, 1);
+            item.CreateUIElement(useRelativePosition: false);
+            item.UpdateUIElement();
+            return item;
+        }
+
+        var shortLabel = Make("Play", "Oyna", 80, 23, 23);
+        var longLabel = Make("Store", "Mağazadaki bütün oyunlara göz at", 80, 23, 23);
+        Check(shortLabel.TextBlock.FontSize == 20 && longLabel.TextBlock.FontSize == 20,
+            "equal source line heights preserve equal fonts despite translation lengths");
+        Check(!longLabel.TextFitsBox, "long translation requests more space before shrinking");
+        longLabel.Relayout(800, TextObject.DefaultMinSourceSizeRatio);
+        Check(longLabel.TextFitsBox && longLabel.TextBlock.FontSize == 20,
+            "widening fits the translation while preserving its source font size");
+        longLabel.Relayout(80, 0.4, allowShrink: true);
+        Check(longLabel.TextBlock.FontSize >= 10 && longLabel.TextBlock.FontSize < 20,
+            "explicit last-resort shrink respects the user minimum");
+        double shrunken = longLabel.TextBlock.FontSize;
+        var heading = Make("Heading", "Başlık", 400, 46, 46);
+        var paragraph = Make("one\ntwo\nthree", "Birinci satır ve sonraki satırlar", 250, 90, 23);
+        Check(heading.TextBlock.FontSize == 40 && paragraph.TextBlock.FontSize == 20,
+            "heading/body hierarchy and multiline source size are preserved");
+        var limited = Make("Heading", "Başlık", 400, 46, 46, min: 12, max: 18);
+        Check(limited.TextBlock.FontSize == 18, "custom font upper bound is honored");
+        var fixedSize = Make("Play", "Oyna", 80, 23, 46, autoSize: false);
+        Check(fixedSize.TextBlock.FontSize == 24, "auto-size disabled retains the existing fixed 24-DIP setting");
+        var rtl = Make("Settings", "الإعدادات", 180, 23, 23);
+        rtl.FlowDirection = FlowDirection.RightToLeft;
+        rtl.UpdateUIElement();
+        Check(rtl.TextBlock.FlowDirection == FlowDirection.RightToLeft && rtl.TextBlock.FontSize == 20,
+            "RTL uses the same source-size policy and retains its direction");
+
+        // Force the actual Loaded callback after layout/collision sizing has already happened.
+        var canvas = new Canvas();
+        canvas.Children.Add(shortLabel.Border);
+        canvas.Children.Add(longLabel.Border);
+        Canvas.SetTop(longLabel.Border, 50);
+        var window = new Window { Content = canvas, Width = 900, Height = 250, ShowInTaskbar = false };
+        try
+        {
+            window.Show(); Flush();
+            Check(shortLabel.TextBlock.FontSize == 20 && longLabel.TextBlock.FontSize == shrunken,
+                "Loaded does not override the chosen font or undo last-resort fitting");
+            longLabel.Relayout(800, TextObject.DefaultMinSourceSizeRatio);
+            Check(longLabel.TextBlock.FontSize == 20, "a later refresh restores preferred size when space is available");
+        }
+        finally { window.Close(); }
+
+        var dpi = Make("Heading", "Başlık", 160, 46, 46);
+        dpi.BindCaptureGeometry(new(300, 150, 160, 46, 46), 1, 1);
+        var patch = System.Windows.Media.Imaging.BitmapSource.Create(2, 2, 96, 96, PixelFormats.Bgra32,
+            null, new byte[16], 8);
+        dpi.SetErasedBackground(patch, new Rect(296, 146, 168, 54));
+        dpi.ApplyRenderDpi(2, 2);
+        Check(dpi.X == 150 && dpi.Y == 75 && dpi.Width == 80 && dpi.Height == 23 && dpi.SourceLineHeight == 23,
+            "existing OCR objects reproject their original pixels on a DPI change");
+        Check(dpi.TextBlock.FontSize == 20 && dpi.EraserElement!.Width == 84 &&
+            Canvas.GetLeft(dpi.EraserElement) == 148 && Canvas.GetTop(dpi.EraserElement) == 73,
+            "font and erased background scale together with the OCR box");
+        dpi.ApplyRenderDpi(2, 2);
+        dpi.ApplyRenderDpi(1, 1);
+        Check(dpi.X == 300 && dpi.Width == 160 && dpi.TextBlock.FontSize == 40 && dpi.EraserElement!.Width == 168,
+            "repeated DPI refreshes and monitor round-trip do not compound scaling");
+        TextObject.ClearCache();
+    }
+
+    private static void CheckSettingsWindow()
+    {
+        var settings = new SettingsWindow(initializeRuntime: false);
+        try
+        {
+            settings.Show();
+            Flush();
+            Check(settings.IsVisible, "complete compiled Settings window opens");
+            var tabs = (TabControl)settings.FindName("settingsCategories");
+            var phrases = (ListView)settings.FindName("ignorePhraseListView");
+            phrases.ItemsSource = new[] { new IgnorePhrase("sample", IgnorePhraseMatchType.Contains) };
+            foreach (var tab in tabs.Items.OfType<TabItem>())
+            {
+                tabs.SelectedItem = tab;
+                Flush();
+                foreach (var expander in Descendants(settings).OfType<Expander>().ToList())
+                    expander.IsExpanded = true;
+                Flush();
+                Check(Descendants(settings).Any(), "Settings category renders: " + tab.Header);
+            }
+            var matchType = Descendants(phrases).OfType<ComboBox>().Single();
+            Check(ReferenceEquals(matchType.ItemsSource, settings.MatchTypeOptions), "ignore-phrase template resolves its Settings ancestor");
+            Check(matchType.SelectedValue is IgnorePhraseMatchType.Contains, "ignore-phrase template preserves selected match type");
+            foreach (string language in new[] { "en", "tr" })
+            {
+                LocalizationManager.Instance.CurrentLanguage = language;
+                Flush();
+                Check(settings.Title == UiText.Get("Settings_Title"), "complete Settings title follows language: " + language);
+            }
+            settings.Hide();
+            settings.Show();
+            Flush();
+            Check(settings.IsVisible, "compiled Settings window can hide and reopen");
+            Check(typeof(ConfigManager).GetField("_instance", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!.GetValue(null) == null,
+                "Settings markup does not create user configuration during initialization");
+            Check(!Application.Current.Windows.OfType<MainWindow>().Any(), "Settings visual check does not start MainWindow or capture");
+        }
+        finally { settings.Close(); }
+    }
+
+    private static void CheckSettingsError()
+    {
+        const string secret = "fake-settings-secret-1234";
+        CredentialRedactor.Register(secret);
+        var error = new InvalidOperationException("outer", new Exception("nested failure: " + secret));
+        var dialog = SettingsWindowError.Create(error, "test-log-path");
+        try
+        {
+            dialog.Show();
+            Flush();
+            var details = Descendants(dialog).OfType<TextBox>().Single();
+            Check(details.IsReadOnly && details.Text.Contains("nested failure"), "Settings diagnostics include nested exceptions and are selectable read-only");
+            Check(!details.Text.Contains(secret) && details.Text.Contains("[REDACTED]"), "Settings diagnostics redact registered credentials");
+            Check(Descendants(dialog).OfType<Button>().Any(b => Equals(b.Content, UiText.Get("Settings_CopyError"))), "Settings diagnostics expose a copy action");
+            Check(dialog.Title == UiText.Get("Settings_ErrorTitle"), "Settings error dialog is localized");
+        }
+        finally { dialog.Close(); }
     }
 
     private static void CheckTemplate(string file, string templateKey, params string[] converterKeys)

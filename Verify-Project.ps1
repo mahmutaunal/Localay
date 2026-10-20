@@ -55,6 +55,13 @@ try {
     }
     Invoke-Check 'security-regressions' { Invoke-ProjectCheck 'SecurityChecks' }
     Invoke-Check 'ui-preferences' { Invoke-ProjectCheck 'PreferenceChecks' }
+    Invoke-Check 'ocr-scene-regressions' { Invoke-ProjectCheck 'OcrSceneChecks' }
+    Invoke-Check 'request-lifetime-regressions' { Invoke-ProjectCheck 'LifetimeChecks' }
+    Invoke-Check 'translation-resilience-regressions' { Invoke-ProjectCheck 'TranslationResilienceChecks' }
+    Invoke-Check 'overlay-layout-regressions' { Invoke-ProjectCheck 'OverlayLayoutChecks' }
+    $ocrScript = Join-Path $ReportDirectory 'ocr-setup-command.ps1'
+    Invoke-Check 'ocr-setup-regressions' { Invoke-ProjectCheck 'OcrSetupChecks' @('--script-path', $ocrScript) }
+    Invoke-Check 'ocr-setup-script-regressions' { & ./tests/OcrSetupScriptChecks.ps1 -ScriptPath $ocrScript }
     Invoke-Check 'localization' { Invoke-ProjectCheck 'LocalizationChecks' }
     if ($buildSucceeded) {
         Invoke-Check 'identity-and-bundled-licenses' { Invoke-ProjectCheck 'BrandChecks' @('.', './bin/Release/Localay.dll') }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -11,7 +11,7 @@ namespace AlpWareStudio.Localay
     {
         // Shared across instances (a new service is created per translation) so connections are reused.
         // Local models can be slow, hence the long timeout.
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromMinutes(2) };
 
         /// <summary>
         /// Translate text using the LM Studio API
@@ -50,11 +50,11 @@ namespace AlpWareStudio.Localay
                 
                 Console.WriteLine($"Sending request to LM Studio API at: {lmStudioEndpoint}");
                 
-                HttpResponseMessage response = await _httpClient.PostAsync(lmStudioEndpoint, content);
+                HttpResponseMessage response = await _httpClient.PostAsync(lmStudioEndpoint, content, TranslationRequestContext.Cancellation);
                 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     TranslationErrorNotifier.Reset("LM Studio");
                     
                     // Parse the LM Studio response which has a different format from Gemini
@@ -156,6 +156,7 @@ namespace AlpWareStudio.Localay
                         }
                         catch (JsonException ex)
                         {
+                            TranslationRequestContext.ReportException(ex);
                             // If nested parsing fails, use the original response text
                             Console.WriteLine($"Could not parse nested JSON, using raw response: {ex.Message}");
                         }
@@ -185,6 +186,7 @@ namespace AlpWareStudio.Localay
                     }
                     catch (JsonException jex)
                     {
+                        TranslationRequestContext.ReportException(jex);
                         Console.WriteLine($"Error parsing LM Studio response: {jex.Message}");
                         LogManager.Instance.WriteContentLine($"Raw response: {jsonResponse}");
                         return null;
@@ -192,7 +194,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    string errorMessage = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     LogManager.Instance.WriteContentLine($"LM Studio API error: {response.StatusCode}, {errorMessage}");
                     
                     // Try to parse the error message from JSON if possible
@@ -226,6 +228,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"LM Studio API error: {ex.Message}");
             
                 // Show error message to user for other exceptions

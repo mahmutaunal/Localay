@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -9,7 +9,7 @@ namespace AlpWareStudio.Localay
 {
     public class GroqTranslationService : ITranslationService
     {
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(60) };
 
         /// <summary>Open the HTTPS connection before the first translation (see TranslationWarmUp).</summary>
         internal static Task WarmUpConnectionAsync() =>
@@ -81,6 +81,7 @@ namespace AlpWareStudio.Localay
             {
                 if (string.IsNullOrEmpty(apiKey))
                 {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
                     Console.WriteLine("Groq API key not configured");
                     return null;
                 }
@@ -112,11 +113,11 @@ namespace AlpWareStudio.Localay
                 _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
 
                 string url = "https://api.groq.com/openai/v1/chat/completions";
-                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+                HttpResponseMessage response = await _httpClient.PostAsync(url, content, TranslationRequestContext.Cancellation);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     // Reset consecutive failures counter on success
                     _consecutiveFailures = 0;
                     TranslationErrorNotifier.Reset("Groq");
@@ -129,7 +130,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    string errorMessage = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     _consecutiveFailures++;
                     LogManager.Instance.WriteContentLine($"Groq API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
 
@@ -181,7 +182,7 @@ namespace AlpWareStudio.Localay
                                     string.Format(LocalizationManager.Instance.Strings["Msg_GroqApiError"], detailedError),
                                     LocalizationManager.Instance.Strings["Title_GroqError"]);
                             }
-                            await Task.Delay(delayMS);
+                            await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                             return null;
                         }
                     }
@@ -199,12 +200,13 @@ namespace AlpWareStudio.Localay
                             string.Format(LocalizationManager.Instance.Strings["Msg_GroqApiErrorStatus"], response.StatusCode, errorMessage),
                             LocalizationManager.Instance.Strings["Title_GroqError"]);
                     }
-                    await Task.Delay(delayMS);
+                    await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                     return null;
                 }
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Translation API error: {ex.Message}");
                 
                 // Write error to file

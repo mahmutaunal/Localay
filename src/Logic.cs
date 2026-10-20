@@ -34,6 +34,14 @@ namespace AlpWareStudio.Localay
         private bool _isProcessingAudioBatch = false;
         private bool _hasNewAudioSinceLastTranslation = false;
 
+        private readonly OcrSceneState _ocrScene = new();
+        private readonly TranslationRetryState _translationRetry = new();
+        private readonly PipelineLifetime _pipelineLifetime = new();
+        private readonly PipelineLifetime _captureLifetime = new();
+        private bool _deferredOcrScheduled;
+        public bool AreOverlaysCurrent => _ocrScene.Latest == null || _ocrScene.IsCurrent;
+        internal PipelineLifetime.Lease CaptureSession() => _captureLifetime.Capture();
+
         private string _lastOcrHash = string.Empty;
         private string _lastTextContent = string.Empty;
         // Last OCR text logged as skipped, so a static screen is logged once instead of every frame
@@ -61,7 +69,7 @@ namespace AlpWareStudio.Localay
 
         public bool GetWaitingForTranslationToFinish()
         {
-            return _waitingForTranslationToFinish;
+            return _waitingForTranslationToFinish || _ocrScene.IsTranslating;
         }
         public int GetNextTextID()
         {
@@ -158,6 +166,13 @@ namespace AlpWareStudio.Localay
 
         void OnFinishedThings(bool bResetTranslationStatus)
         {
+            // Individual response parsers/manga batches also call this method. Only the
+            // top-level translation's finally block may release the queued OCR result.
+            if (_ocrScene.IsTranslating)
+            {
+                MonitorWindow.Instance.RefreshOverlays();
+                return;
+            }
             SetWaitingForTranslationToFinish(false);
             MonitorWindow.Instance.RefreshOverlays();
 
@@ -166,14 +181,40 @@ namespace AlpWareStudio.Localay
             {
                 MonitorWindow.Instance.HideTranslationStatus();
             }
+
+            if (_ocrScene.HasDeferred && !_deferredOcrScheduled)
+            {
+                _deferredOcrScheduled = true;
+                Application.Current.Dispatcher.BeginInvoke(() =>
+                {
+                    _deferredOcrScheduled = false;
+                    if (GetWaitingForTranslationToFinish()) return;
+                    string? latest = _ocrScene.TakeDeferred();
+                    if (latest != null && MainWindow.Instance.GetIsStarted())
+                        ProcessReceivedTextJsonData(latest);
+                }, DispatcherPriority.Background);
+            }
         }
 
         // The last OCR result is fully handled: shown (or being translated) and not waiting to settle,
         // so OCR of an identical frame would change nothing
-        public bool IsOcrResultSettled => _lastChangeTime == DateTime.MinValue && _lastOcrHash.Length > 0;
+        public bool IsOcrResultSettled => !_translationRetry.IsDue(DateTimeOffset.UtcNow) && _lastChangeTime == DateTime.MinValue && _lastOcrHash.Length > 0;
+
+        private void InvalidatePendingWork(bool discardSourceFrame = true)
+        {
+            if (discardSourceFrame) _captureLifetime.Invalidate();
+            _pipelineLifetime.Invalidate();
+            _ocrScene.TakeDeferred();
+            _prefetchTask = null;
+            _prefetchTexts = null;
+            if (discardSourceFrame) SetOcrSourceFrame(null);
+        }
 
         public void ResetHash()
         {
+            // A settings reset must also invalidate rendered text; otherwise identical OCR
+            // could reuse a translation made with the previous model/prompt/language.
+            ClearAllTextObjects();
             _lastOcrHash = "";
             _lastTextContent = string.Empty;
             _lastChangeTime = DateTime.Now;
@@ -203,7 +244,10 @@ namespace AlpWareStudio.Localay
                     }
 
                     Console.WriteLine("Retrying current translation (bypassing similarity checks and the translation cache).");
+                    _translationRetry.Reset();
                     _bypassTranslationCacheOnce = true;
+                    foreach (var textObject in _textObjects) textObject.TextTranslated = "";
+                    MonitorWindow.Instance.RefreshOverlays();
 
                     // Clear the last-hash / last-text so similarity gating is bypassed
                     _lastOcrHash = string.Empty;
@@ -259,10 +303,11 @@ namespace AlpWareStudio.Localay
                                 if (id == "999")
                                 {
                                     // Split the translated text using the separator
-                                    string[] translatedParts = translatedText.Split("##|||##");
+                                    string[]? translatedParts = TranslationParts.SplitExact(translatedText, _textObjects.Count);
+                                    if (translatedParts == null) continue;
 
                                     // Assign each part to the corresponding text object
-                                    for (int j = 0; j < Math.Min(translatedParts.Length, _textObjects.Count); j++)
+                                    for (int j = 0; j < translatedParts.Length; j++)
                                     {
                                         // Clean up the translated text - remove any remaining (possibly mangled) ##|||## separators.
                                         // Only fragments around "|||" are removed, so real text such as "#1" is left intact.
@@ -271,6 +316,7 @@ namespace AlpWareStudio.Localay
                                             @"#{0,2}\s*\|{3}\s*#{0,2}",
                                             ""
                                         );
+                                        if (string.IsNullOrWhiteSpace(cleanTranslatedText)) continue;
 
                                         // Apply RTL specific handling if needed
                                         if (isRtlLanguage)
@@ -306,6 +352,7 @@ namespace AlpWareStudio.Localay
                                     var matchingTextObj = _textObjects.FirstOrDefault(t => t.ID == id);
                                     if (matchingTextObj != null)
                                     {
+
                                         // Apply RTL specific handling if needed
                                         if (isRtlLanguage)
                                         {
@@ -335,7 +382,8 @@ namespace AlpWareStudio.Localay
                                         string indexStr = id.Substring(5); // Remove "text_" prefix
                                         if (int.TryParse(indexStr, out int index) && index >= 0 && index < _textObjects.Count)
                                         {
-                                            // Apply RTL specific handling if needed
+
+                                        // Apply RTL specific handling if needed
                                             if (isRtlLanguage)
                                             {
                                                 // Set flow direction for RTL languages
@@ -413,11 +461,7 @@ namespace AlpWareStudio.Localay
             _ocrProcessingStopwatch.Restart();
             MainWindow.Instance.SetOCRCheckIsWanted(true);
 
-            if (GetWaitingForTranslationToFinish())
-            {
-                Console.WriteLine("Skipping OCR results - waiting for translation to finish");
-                return;
-            }
+            if (!MainWindow.Instance.GetIsStarted()) return;
 
             try
             {
@@ -459,42 +503,68 @@ namespace AlpWareStudio.Localay
                                 string textContent = ExtractTextContent(modifiedResults);
                                 OnboardingTips.OnOcrResult(!string.IsNullOrWhiteSpace(textContent));
 
-                                // Handle settle time if enabled
-                                double settleTime = ConfigManager.Instance.GetBlockDetectionSettleTime();
-                                double similarThreshold = ConfigManager.Instance.GetTextSimilarThreshold();
-                                bool hashMatch = contentHash == _lastOcrHash;
-                                // Typewriter text: a few more characters per frame still scores as similar, which
-                                // settled (and translated) half a sentence, then skipped the rest as already shown
-                                bool growing = !hashMatch && TextGrowth.IsGrowth(_lastTextContent, textContent);
-                                double similarity = 0.0;
-                                if (settleTime > 0)
+                                var scene = OcrSceneSnapshot.FromResults(modifiedResults, ConfigManager.Instance.GetMinTextFragmentSize());
+                                bool growing = TextGrowth.IsGrowth(_lastTextContent, textContent);
+                                // The configured similarity tolerance may settle noisy OCR at stationary
+                                // coordinates, but never authorizes showing a translation for different text.
+                                bool sameCandidateText = _lastOcrHash.Length > 0 && _ocrScene.Latest != null &&
+                                    (_ocrScene.Latest.HasSameText(scene) ||
+                                     (!growing && _ocrScene.Latest.HasSameGeometry(scene) &&
+                                      IsTextSimilar(textContent, _lastTextContent, ConfigManager.Instance.GetTextSimilarThreshold(), out _)));
+                                if (_ocrScene.Observe(scene))
                                 {
-                                    if (hashMatch || (!growing && IsTextSimilar(textContent, _lastTextContent, similarThreshold, out similarity)))
+                                    _translationRetry.Reset();
+                                    InvalidatePendingWork(discardSourceFrame: false);
+                                }
+                                if (!AreOverlaysCurrent)
+                                    MonitorWindow.Instance.RefreshOverlays();
+
+                                // Translation is serial, but observation is not blocked by the network.
+                                // Preserve the active request's objects until it finishes; hide them if stale.
+                                if (GetWaitingForTranslationToFinish())
+                                {
+                                    _ocrScene.Defer(data);
+                                    return;
+                                }
+                                _ocrScene.TakeDeferred(); // A fresh OCR result supersedes any queued one.
+
+                                if (scene.IsEmpty)
+                                {
+                                    ClearRenderedTextObjects();
+                                    _ocrScene.MarkRendered(scene);
+                                    _lastOcrHash = contentHash;
+                                    _lastTextContent = textContent;
+                                    _lastChangeTime = DateTime.MinValue;
+                                    OnFinishedThings(true);
+                                    return;
+                                }
+
+                                // Text identity controls translation reuse; geometry controls presentation.
+                                // Rebuild backgrounds and boxes at their new coordinates without an API call.
+                                if (TryRefreshOcrLayout(modifiedResults, scene))
+                                {
+                                    LogSimilaritySkip(contentHash == _lastOcrHash, 1.0,
+                                        ConfigManager.Instance.GetTextSimilarThreshold(), textContent);
+                                    _lastOcrHash = contentHash;
+                                    _lastTextContent = textContent;
+                                    _lastChangeTime = DateTime.MinValue;
+                                    OnFinishedThings(true);
+                                    return;
+                                }
+
+                                double settleTime = ConfigManager.Instance.GetBlockDetectionSettleTime();
+                                if (settleTime > 0 && !_translationRetry.IsDue(DateTimeOffset.UtcNow))
+                                {
+                                    if (sameCandidateText && _lastChangeTime != DateTime.MinValue)
                                     {
-                                        if (_lastChangeTime == DateTime.MinValue)
+                                        double requiredTime = _textIsGrowing && !TextGrowth.EndsSentence(textContent)
+                                            ? settleTime + TypewriterExtraWaitSeconds : settleTime;
+                                        if ((DateTime.Now - _lastChangeTime).TotalSeconds < requiredTime)
                                         {
-                                            LogSimilaritySkip(hashMatch, similarity, similarThreshold, textContent);
-                                            OnFinishedThings(true);
-                                            return; // Already rendered it, just ignore until it changes again
+                                            OnFinishedThings(false);
+                                            return;
                                         }
-                                        else
-                                        {
-                                            // Text that was typing out and stopped mid-sentence (a pause on a comma or
-                                            // an ellipsis) gets a little longer before it counts as settled
-                                            double requiredTime = _textIsGrowing && !TextGrowth.EndsSentence(textContent)
-                                                ? settleTime + TypewriterExtraWaitSeconds
-                                                : settleTime;
-                                            if ((DateTime.Now - _lastChangeTime).TotalSeconds < requiredTime)
-                                            {
-                                                OnFinishedThings(false);
-                                                return;
-                                            }
-                                            else
-                                            {
-                                                // Settle time reached
-                                                _lastChangeTime = DateTime.MinValue;
-                                            }
-                                        }
+                                        _lastChangeTime = DateTime.MinValue;
                                     }
                                     else
                                     {
@@ -503,35 +573,19 @@ namespace AlpWareStudio.Localay
                                         _lastOcrHash = contentHash;
                                         _lastTextContent = textContent;
                                         _lastSkipLoggedText = string.Empty;
-                                        // An empty frame (text disappeared) has nothing to time or translate
-                                        if (!string.IsNullOrWhiteSpace(textContent))
-                                        {
-                                            OcrTiming.NewTextDetected(growing
-                                                ? $"still typing out, waiting for it to settle: '{OcrTiming.Preview(textContent)}'"
-                                                : $"waiting {settleTime:F2}s for it to settle: '{OcrTiming.Preview(textContent)}'");
-                                            // A prefetch of text that is still typing out would be thrown away; the
-                                            // frame that completes the sentence is still prefetched
-                                            if (!growing || TextGrowth.EndsSentence(textContent))
-                                                StartTranslationPrefetch(modifiedResults);
-                                        }
-
-                                        //only run if translation is still active
+                                        OcrTiming.NewTextDetected(growing
+                                            ? $"still typing out, waiting for it to settle: '{OcrTiming.Preview(textContent)}'"
+                                            : $"waiting {settleTime:F2}s for it to settle: '{OcrTiming.Preview(textContent)}'");
+                                        if (!growing || TextGrowth.EndsSentence(textContent))
+                                            StartTranslationPrefetch(modifiedResults);
                                         if (MainWindow.Instance.GetIsStarted())
                                         {
-
                                             MonitorWindow.Instance.ShowTranslationStatus(true);
                                             ChatBoxWindow.Instance?.ShowTranslationStatus(true);
                                         }
-
                                         OnFinishedThings(false);
-                                        return; // Sure, it's new, but we probably aren't ready to show it yet
+                                        return;
                                     }
-                                }
-                                else if (!growing && IsTextSimilar(textContent, _lastTextContent, similarThreshold, out similarity))
-                                {
-                                    LogSimilaritySkip(false, similarity, similarThreshold, textContent);
-                                    OnFinishedThings(true);
-                                    return;
                                 }
                                 // Looks like new stuff
                                 if (string.IsNullOrWhiteSpace(textContent))
@@ -548,42 +602,11 @@ namespace AlpWareStudio.Localay
                                 double scale = BlockDetectionManager.Instance.GetBlockDetectionScale();
                                 Console.WriteLine($"Character-level processing (scale={scale:F2}): {resultsElement.GetArrayLength()} characters → {modifiedResults.GetArrayLength()} blocks");
 
-                                // Create a new JsonDocument with the modified results
-                                using (var stream = new MemoryStream())
-                                {
-                                    using (var writer = new Utf8JsonWriter(stream))
-                                    {
-                                        writer.WriteStartObject();
-
-                                        // Copy over all existing properties except 'results'
-                                        foreach (var property in root.EnumerateObject())
-                                        {
-                                            if (property.Name != "results")
-                                            {
-                                                property.WriteTo(writer);
-                                            }
-                                        }
-
-                                        // Add our modified results
-                                        writer.WritePropertyName("results");
-                                        modifiedResults.WriteTo(writer);
-
-                                        // Add marker to indicate this is character-level data
-                                        writer.WriteBoolean("char_level", true);
-
-                                        writer.WriteEndObject();
-                                    }
-
-                                    stream.Position = 0;
-                                    using (JsonDocument newDoc = JsonDocument.Parse(stream))
-                                    {
-                                        DisplayOcrResults(newDoc.RootElement);
-                                    }
-
-                                    _ocrProcessingStopwatch.Stop();
-                                    Console.WriteLine($"OCR JSON processing took {_ocrProcessingStopwatch.ElapsedMilliseconds} ms");
-
-                                }
+                                if (!DisplayOcrResults(modifiedResults)) return;
+                                _ocrScene.MarkRendered(scene);
+                                MonitorWindow.Instance.RefreshOverlays();
+                                _ocrProcessingStopwatch.Stop();
+                                Console.WriteLine($"OCR JSON processing took {_ocrProcessingStopwatch.ElapsedMilliseconds} ms");
 
                                 // Add the detected text to the ChatBox
                                 if (_textObjects.Count > 0)
@@ -974,8 +997,35 @@ namespace AlpWareStudio.Localay
             return value.Substring(start, end - start);
         }
 
+        private bool TryRefreshOcrLayout(JsonElement results, OcrSceneSnapshot scene)
+        {
+            if (_ocrScene.Rendered?.HasSameText(scene) != true || _textObjects.Count == 0 ||
+                !GetTranslatableTexts(results).SequenceEqual(_textObjects.Select(t => t.Text), StringComparer.Ordinal))
+                return false;
+            // Continue repositioning partial results while waiting, but let a due retry
+            // pass through the normal serial translation pipeline.
+            if (_translationRetry.IsDue(DateTimeOffset.UtcNow) &&
+                _textObjects.Any(t => string.IsNullOrWhiteSpace(t.TextTranslated))) return false;
+            if (_ocrScene.IsCurrent) return true;
+
+            var translations = _textObjects.Select(t => (t.Text, t.TextTranslated, t.FlowDirection)).ToArray();
+            if (!DisplayOcrResults(results)) return false;
+            if (!_textObjects.Select(t => t.Text).SequenceEqual(translations.Select(t => t.Text), StringComparer.Ordinal))
+                return false;
+            for (int i = 0; i < _textObjects.Count; i++)
+            {
+                _textObjects[i].TextTranslated = translations[i].TextTranslated;
+                _textObjects[i].FlowDirection = translations[i].FlowDirection;
+                if (!string.IsNullOrEmpty(_textObjects[i].TextTranslated))
+                    _textObjects[i].UpdateUIElement();
+            }
+            _ocrScene.MarkRendered(scene);
+            OcrTiming.Log("2. OCR layout updated", "existing translations repositioned without a service request");
+            return true;
+        }
+
         // Display OCR results from JSON - processes character-level blocks
-        private void DisplayOcrResults(JsonElement root)
+        private bool DisplayOcrResults(JsonElement resultsElement)
         {
             // Taken over from the field so a frame stored meanwhile cannot dispose it while it is in use
             Bitmap? sourceBitmap = null;
@@ -991,21 +1041,13 @@ namespace AlpWareStudio.Localay
             try
             {
                 // Check for results array
-                if (root.TryGetProperty("results", out JsonElement resultsElement) &&
-                    resultsElement.ValueKind == JsonValueKind.Array)
+                if (resultsElement.ValueKind == JsonValueKind.Array)
                 {
-                    // Get processing time if available
-                    double processingTime = 0;
-                    if (root.TryGetProperty("processing_time_seconds", out JsonElement timeElement))
-                    {
-                        processingTime = timeElement.GetDouble();
-                    }
-
                     // Get minimum text fragment size from config
                     int minTextFragmentSize = ConfigManager.Instance.GetMinTextFragmentSize();
 
-                    // Clear existing text objects before adding new ones
-                    ClearAllTextObjects();
+                    // Keep scene identity/deferred observations when replacing only the visual objects.
+                    ClearRenderedTextObjects();
 
                     // Check if auto merge overlapping text is enabled
                     bool autoMergeEnabled = ConfigManager.Instance.IsAutoMergeOverlappingTextEnabled();
@@ -1038,13 +1080,12 @@ namespace AlpWareStudio.Localay
                                 int? bubbleId = item.TryGetProperty("bubble_id", out JsonElement bubbleElement) && bubbleElement.ValueKind == JsonValueKind.Number
                                     ? bubbleElement.GetInt32()
                                     : null;
-                                tempBlocks.Add(new TempTextBlock { Text = text, X = x, Y = y, Width = width, Height = height, Confidence = confidence, BubbleId = bubbleId });
+                                tempBlocks.Add(new TempTextBlock { Text = text, X = x, Y = y, Width = width, Height = height, Confidence = confidence, BubbleId = bubbleId, LineHeights = new() { ReadSourceLineHeight(item, text, width, height) } });
                             }
                             else
                             {
-                                // OCR boxes are in capture pixels; the overlay canvas is in MonitorWindow DIPs
-                                DpiHelper.GetWindowRenderDpi(MonitorWindow.Instance, out double dpiScaleX, out double dpiScaleY);
-                                CreateTextObjectAtPosition(text, x / dpiScaleX, y / dpiScaleY, width / dpiScaleX, height / dpiScaleY, confidence, sourceBitmap);
+                                CreateTextObjectAtPosition(text, x, y, width, height, confidence, sourceBitmap,
+                                    ReadSourceLineHeight(item, text, width, height));
                             }
                         }
                     }
@@ -1053,8 +1094,6 @@ namespace AlpWareStudio.Localay
                     if (autoMergeEnabled && tempBlocks.Count > 0)
                     {
                         var (mergedBlocks, blockOriginalBounds) = MergeOverlappingTextBlocks(tempBlocks);
-                        // OCR boxes are in capture pixels; the overlay canvas is in MonitorWindow DIPs
-                        DpiHelper.GetWindowRenderDpi(MonitorWindow.Instance, out double dpiScaleX, out double dpiScaleY);
 
                         for (int i = 0; i < mergedBlocks.Count; i++)
                         {
@@ -1066,16 +1105,18 @@ namespace AlpWareStudio.Localay
                             double originalWidth = bounds.MaxX - bounds.MinX;
                             double originalHeight = bounds.MaxY - bounds.MinY;
 
-                            CreateTextObjectAtPosition(block.Text, originalX / dpiScaleX, originalY / dpiScaleY,
-                                originalWidth / dpiScaleX, originalHeight / dpiScaleY, block.Confidence, sourceBitmap);
+                            CreateTextObjectAtPosition(block.Text, originalX, originalY,
+                                originalWidth, originalHeight, block.Confidence, sourceBitmap, OverlayFontPolicy.Median(block.LineHeights));
                         }
                     }
                 }
+                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error displaying OCR results: {ex.Message}");
                 OnFinishedThings(true);
+                return false;
             }
             finally
             {
@@ -1084,6 +1125,15 @@ namespace AlpWareStudio.Localay
                     sourceBitmap.Dispose();
                 }
             }
+        }
+
+        // Keep the source line metric even when a paragraph has multiple lines/columns.
+        private static double ReadSourceLineHeight(JsonElement item, string text, double width, double height)
+        {
+            int lines = item.TryGetProperty("line_count", out var count) && count.ValueKind == JsonValueKind.Number && count.TryGetInt32(out int n) ? n : 0;
+            double measured = item.TryGetProperty("source_line_height", out var metric) && metric.ValueKind == JsonValueKind.Number && metric.TryGetDouble(out double value) ? value : 0;
+            bool vertical = item.TryGetProperty("is_vertical", out var orientation) && orientation.ValueKind == JsonValueKind.True;
+            return OverlayFontPolicy.SourceLineHeight(width, height, text, lines, vertical, measured);
         }
 
         // Bounding box of an OCR result item from its "rect" points (zero size when missing)
@@ -1151,7 +1201,7 @@ namespace AlpWareStudio.Localay
                     int? bubbleId = item.TryGetProperty("bubble_id", out JsonElement bubbleElement) && bubbleElement.ValueKind == JsonValueKind.Number
                         ? bubbleElement.GetInt32()
                         : null;
-                    tempBlocks.Add(new TempTextBlock { Text = text, X = x, Y = y, Width = width, Height = height, Confidence = confElement.GetDouble(), BubbleId = bubbleId });
+                    tempBlocks.Add(new TempTextBlock { Text = text, X = x, Y = y, Width = width, Height = height, Confidence = confElement.GetDouble(), BubbleId = bubbleId, LineHeights = new() { ReadSourceLineHeight(item, text, width, height) } });
                 }
                 else
                 {
@@ -1169,7 +1219,7 @@ namespace AlpWareStudio.Localay
         }
 
         // Create a text object at the specified position with confidence info
-        private void CreateTextObjectAtPosition(string text, double x, double y, double width, double height, double confidence, Bitmap? sourceBitmap)
+        private void CreateTextObjectAtPosition(string text, double x, double y, double width, double height, double confidence, Bitmap? sourceBitmap, double sourceLineHeightPixels = 0)
         {
             try
             {
@@ -1178,11 +1228,16 @@ namespace AlpWareStudio.Localay
                 {
                     // Run on UI thread to ensure STA compliance
                     Application.Current.Dispatcher.Invoke(() =>
-                        CreateTextObjectAtPosition(text, x, y, width, height, confidence, sourceBitmap));
+                        CreateTextObjectAtPosition(text, x, y, width, height, confidence, sourceBitmap, sourceLineHeightPixels));
                     return;
                 }
 
                 // Store current capture position with the text object
+                var captureGeometry = new OverlayPixelGeometry(x, y, width, height, sourceLineHeightPixels);
+                DpiHelper.GetWindowRenderDpi(MonitorWindow.Instance, out double renderScaleX, out double renderScaleY);
+                var logical = captureGeometry.ToDips(renderScaleX, renderScaleY);
+                (x, y, width, height) = (logical.X, logical.Y, logical.Width, logical.Height);
+
                 int captureX = _currentCaptureX;
                 int captureY = _currentCaptureY;
 
@@ -1257,6 +1312,9 @@ namespace AlpWareStudio.Localay
                     bgBrush,
                     captureX, captureY  // Store original capture coordinates
                 );
+                captureGeometry = new OverlayPixelGeometry(x * renderScaleX, y * renderScaleY,
+                    width * renderScaleX, height * renderScaleY, sourceLineHeightPixels);
+                textObject.BindCaptureGeometry(captureGeometry, renderScaleX, renderScaleY);
                 textObject.ID = "text_" + GetNextTextID();
                 if (erasedPatch != null)
                 {
@@ -1503,6 +1561,7 @@ namespace AlpWareStudio.Localay
         // Process bitmap directly with Windows OCR (no file saving)
         public async void ProcessWithWindowsOCR(System.Drawing.Bitmap bitmap, string sourceLanguage)
         {
+            using var operation = _captureLifetime.Capture();
             try
             {
                 //Console.WriteLine("Starting Windows OCR processing directly from bitmap...");
@@ -1511,6 +1570,7 @@ namespace AlpWareStudio.Localay
                 {
                     // Get the text lines from Windows OCR directly from the bitmap
                     var textLines = await WindowsOCRManager.Instance.GetOcrLinesFromBitmapAsync(bitmap, sourceLanguage);
+                    if (!operation.IsCurrent || !MainWindow.Instance.GetIsStarted()) return;
                     // Console.WriteLine($"Windows OCR found {textLines.Count} text lines");
 
                     // Process the OCR results with language code
@@ -1544,7 +1604,7 @@ namespace AlpWareStudio.Localay
                     // Ignore disposal errors
                 }
 
-                MainWindow.Instance.SetOCRCheckIsWanted(true);
+                if (operation.IsCurrent) MainWindow.Instance.SetOCRCheckIsWanted(true);
 
             }
         }
@@ -1740,6 +1800,7 @@ namespace AlpWareStudio.Localay
         // Process bitmap directly with Windows OCR (no file saving)
         public async void ProcessWithOneOCR(System.Drawing.Bitmap bitmap, string sourceLanguage)
         {
+            using var operation = _captureLifetime.Capture();
             try
             {
 
@@ -1747,6 +1808,7 @@ namespace AlpWareStudio.Localay
                 {
                     var textLines = await OneOCRManager.Instance.GetOcrLinesFromBitmapAsync(bitmap);
 
+                    if (!operation.IsCurrent || !MainWindow.Instance.GetIsStarted()) return;
                     // Process the OCR results with language code
                     await OneOCRManager.Instance.ProcessOneOcrResults(textLines, sourceLanguage, bitmap);
                 }
@@ -1778,7 +1840,7 @@ namespace AlpWareStudio.Localay
                     // Ignore disposal errors
                 }
 
-                MainWindow.Instance.SetOCRCheckIsWanted(true);
+                if (operation.IsCurrent) MainWindow.Instance.SetOCRCheckIsWanted(true);
 
             }
         }
@@ -1855,6 +1917,12 @@ namespace AlpWareStudio.Localay
 
 
         // Clear all text objects
+        private void ClearRenderedTextObjects()
+        {
+            _textObjects.Clear();
+            _textIDCounter = 0;
+        }
+
         public void ClearAllTextObjects()
         {
             try
@@ -1867,10 +1935,15 @@ namespace AlpWareStudio.Localay
                     return;
                 }
 
-                // Clear the collection
-                _textObjects.Clear();
-                _textIDCounter = 0;
-                // No need to remove from the main window UI anymore
+                InvalidatePendingWork();
+                _ocrScene.Reset();
+                _translationRetry.Reset();
+                _lastOcrHash = string.Empty;
+                _lastTextContent = string.Empty;
+                _lastChangeTime = DateTime.Now;
+                ClearRenderedTextObjects();
+                MainWindow.Instance.SetOCRCheckIsWanted(true);
+                MonitorWindow.Instance.RefreshOverlays();
 
                 Console.WriteLine("All text objects cleared");
             }
@@ -1929,10 +2002,11 @@ namespace AlpWareStudio.Localay
                                 if (id == "999")
                                 {
                                     // Split the translated text using the separator
-                                    string[] translatedParts = translatedText.Split("##|||##");
+                                    string[]? translatedParts = TranslationParts.SplitExact(translatedText, _textObjects.Count);
+                                    if (translatedParts == null) continue;
 
                                     // Assign each part to the corresponding text object
-                                    for (int j = 0; j < Math.Min(translatedParts.Length, _textObjects.Count); j++)
+                                    for (int j = 0; j < translatedParts.Length; j++)
                                     {
                                         // Clean up the translated text - remove any remaining separators that might have been part of the translation
                                         // (legacy |||RST||| and mangled ##|||## variants). Only fragments around "|||" are removed,
@@ -1942,6 +2016,7 @@ namespace AlpWareStudio.Localay
                                             @"\|{3}\s*RST\s*\|{3}|#{0,2}\s*\|{3}\s*#{0,2}",
                                             ""
                                         );
+                                        if (string.IsNullOrWhiteSpace(cleanTranslatedText)) continue;
 
                                         // Apply RTL specific handling if needed
                                         if (isRtlLanguage)
@@ -1977,6 +2052,7 @@ namespace AlpWareStudio.Localay
                                     var matchingTextObj = _textObjects.FirstOrDefault(t => t.ID == id);
                                     if (matchingTextObj != null)
                                     {
+
                                         // Apply RTL specific handling if needed
                                         if (isRtlLanguage)
                                         {
@@ -2007,7 +2083,8 @@ namespace AlpWareStudio.Localay
                                         string indexStr = id.Substring(5); // Remove "text_" prefix
                                         if (int.TryParse(indexStr, out int index) && index >= 0 && index < _textObjects.Count)
                                         {
-                                            // Apply RTL specific handling if needed
+
+                                        // Apply RTL specific handling if needed
                                             if (isRtlLanguage)
                                             {
                                                 // Set flow direction for RTL languages
@@ -2174,6 +2251,13 @@ namespace AlpWareStudio.Localay
 
         public async Task TranslateTextObjectsAsync()
         {
+            if (!_ocrScene.TryBeginTranslation()) return;
+            using var operation = _pipelineLifetime.Capture();
+            string? requestContext = null;
+            string? attemptedService = null;
+            TranslationFailure? failure = null;
+            bool evaluateOutcome = false;
+            bool wasCanceled = false;
             try
             {
                 // Show translation status at the beginning
@@ -2211,6 +2295,13 @@ namespace AlpWareStudio.Localay
                 string currentService = ConfigManager.Instance.GetCurrentTranslationService();
                 string currentModel = ConfigManager.Instance.GetCurrentTranslationModel();
 
+                string sourceLanguage = GetSourceLanguage();
+                string targetLanguage = GetTargetLanguage();
+                requestContext = BuildTranslationCacheContext(currentService, currentModel, prompt, gameInfo);
+                EnsureCurrentTranslation(operation, requestContext);
+
+                attemptedService = currentService;
+                evaluateOutcome = true;
                 bool mangaModeEnabled = ConfigManager.Instance.IsMangaModeEnabled();
                 bool hadSuccessfulTranslation = false;
 
@@ -2220,12 +2311,13 @@ namespace AlpWareStudio.Localay
                 _bypassTranslationCacheOnce = false;
                 if (cacheEnabled)
                 {
-                    TranslationCache.Instance.UseContext(BuildTranslationCacheContext(currentService, currentModel, prompt, gameInfo));
+                    TranslationCache.Instance.UseContext(requestContext);
                 }
                 if (readCache)
                 {
                     // The same text is already being translated in the background: use that result instead of a second request
-                    await WaitForMatchingPrefetchAsync();
+                    await WaitForMatchingPrefetchAsync(operation.Token);
+                    EnsureCurrentTranslation(operation, requestContext);
                 }
                 var cachedObjects = readCache ? ApplyCachedTranslations() : new HashSet<TextObject>();
 
@@ -2249,14 +2341,16 @@ namespace AlpWareStudio.Localay
 
                     async Task<bool> TranslateBatchAsync(List<TextObject> batch)
                     {
-                        await concurrency.WaitAsync();
+                        await concurrency.WaitAsync(operation.Token);
                         try
                         {
+                            EnsureCurrentTranslation(operation, requestContext);
                             var payload = batch.Select(t => (object)new { id = t.ID, text = t.Text }).ToList();
-                            string jsonToTranslate = BuildTranslationRequestJson(payload, previousContext, gameInfo);
+                            string jsonToTranslate = BuildTranslationRequestJson(payload, previousContext, gameInfo, sourceLanguage, targetLanguage);
                             LogManager.Instance.LogLlmRequest(prompt, jsonToTranslate);
 
-                            string? translationResponse = await translationService.TranslateAsync(jsonToTranslate, prompt);
+                            string? translationResponse = await TranslationRequestContext.RunAsync(translationService, jsonToTranslate, prompt, operation.Token, f => Interlocked.Exchange(ref failure, f));
+                            EnsureCurrentTranslation(operation, requestContext);
                             if (string.IsNullOrEmpty(translationResponse))
                             {
                                 Console.WriteLine($"Translation failed with {currentService} for {batch.Count} block(s) - empty response");
@@ -2280,6 +2374,7 @@ namespace AlpWareStudio.Localay
                     LogTranslationRequest(currentService, currentModel, blocks, batches.Count, cachedObjects.Count);
                     var requestStopwatch = Stopwatch.StartNew();
                     bool[] batchResults = await Task.WhenAll(batches.Select(TranslateBatchAsync));
+                    EnsureCurrentTranslation(operation, requestContext);
                     hadSuccessfulTranslation = batchResults.Any(ok => ok) || cachedObjects.Count > 0;
                     OcrTiming.Log("4. Translation received", $"{requestStopwatch.ElapsedMilliseconds} ms");
 
@@ -2290,13 +2385,13 @@ namespace AlpWareStudio.Localay
                     {
                         Console.WriteLine($"Manga translation: retrying {missing.Count} untranslated block(s) one by one");
                         bool[] retryResults = await Task.WhenAll(missing.Select(t => TranslateBatchAsync(new List<TextObject> { t })));
+                        EnsureCurrentTranslation(operation, requestContext);
                         hadSuccessfulTranslation |= retryResults.Any(ok => ok);
                         OcrTiming.Log("4b. Missing blocks retried", $"{missing.Count} block(s)");
                     }
 
                     if (!hadSuccessfulTranslation)
                     {
-                        OnboardingTips.OnTranslationResult(currentService, false);
                         OnFinishedThings(true);
                         return;
                     }
@@ -2315,20 +2410,20 @@ namespace AlpWareStudio.Localay
                         }
                     };
 
-                    string jsonToTranslate = BuildTranslationRequestJson(textsToTranslate, previousContext, gameInfo);
+                    string jsonToTranslate = BuildTranslationRequestJson(textsToTranslate, previousContext, gameInfo, sourceLanguage, targetLanguage);
                     LogManager.Instance.LogLlmRequest(prompt, jsonToTranslate);
 
                     // Blocks are matched back by position in one combined text, so a partial cache hit
                     // still sends everything
                     LogTranslationRequest(currentService, currentModel, _textObjects, 1, 0);
                     var requestStopwatch = Stopwatch.StartNew();
-                    string? translationResponse = await translationService.TranslateAsync(jsonToTranslate, prompt);
+                    string? translationResponse = await TranslationRequestContext.RunAsync(translationService, jsonToTranslate, prompt, operation.Token, f => Interlocked.Exchange(ref failure, f));
+                    EnsureCurrentTranslation(operation, requestContext);
                     OcrTiming.Log("4. Translation received", $"{requestStopwatch.ElapsedMilliseconds} ms");
 
                     if (string.IsNullOrEmpty(translationResponse))
                     {
                         Console.WriteLine($"Translation failed with {currentService} - empty response");
-                        OnboardingTips.OnTranslationResult(currentService, false);
                         OnFinishedThings(true);
                         return;
                     }
@@ -2336,35 +2431,49 @@ namespace AlpWareStudio.Localay
                     ProcessTranslatedJSON(translationResponse);
                 }
 
-                // A response that could not be parsed into any translated text also counts as a failure
-                OnboardingTips.OnTranslationResult(currentService, _textObjects.Any(t => !string.IsNullOrEmpty(t.TextTranslated)));
-
+                EnsureCurrentTranslation(operation, requestContext);
                 if (cacheEnabled)
                 {
                     foreach (var textObject in _textObjects)
                     {
-                        TranslationCache.Instance.Set(textObject.Text, textObject.TextTranslated);
+                        TranslationCache.Instance.SetIfContext(requestContext, textObject.Text, textObject.TextTranslated);
                     }
                 }
 
                 _translationStopwatch.Stop();
                 Console.WriteLine($"Translation took {_translationStopwatch.ElapsedMilliseconds} ms");
                 OcrTiming.Log("5. Translation shown", $"translation step took {_translationStopwatch.ElapsedMilliseconds} ms");
-                if (!ConfigManager.Instance.IsAutoOCREnabled())
+                if (!ConfigManager.Instance.IsAutoOCREnabled() && _textObjects.All(t => !string.IsNullOrWhiteSpace(t.TextTranslated)))
                 {
                     MainWindow.Instance.isStopOCR = true;
                 }
 
             }
+            catch (OperationCanceledException)
+            {
+                wasCanceled = true;
+                Console.WriteLine("Translation discarded because its session or settings changed.");
+            }
             catch (Exception ex)
             {
+                if (!operation.IsCurrent) return;
                 Console.WriteLine($"Error translating text objects: {ex.Message}");
-                OnboardingTips.OnTranslationResult(ConfigManager.Instance.GetCurrentTranslationService(), false);
+                failure ??= TranslationFailure.FromException(ex);
                 OnFinishedThings(true);
             }
 
-            //all done
-            OnFinishedThings(true);
+            finally
+            {
+                if (evaluateOutcome && !wasCanceled && operation.IsCurrent && MainWindow.Instance.GetIsStarted())
+                {
+                    bool complete = _textObjects.Count > 0 && _textObjects.All(t => !string.IsNullOrWhiteSpace(t.TextTranslated));
+                    if (complete) _translationRetry.Reset();
+                    else _translationRetry.Failed(failure ?? new(TranslationFailureKind.InvalidResponse), DateTimeOffset.UtcNow);
+                    OnboardingTips.OnTranslationResult(attemptedService!, complete, failure, operation.Token);
+                }
+                _ocrScene.EndTranslation();
+                OnFinishedThings(true);
+            }
         }
 
         // Set when the user asks to retry, so that one translation goes to the service even if cached
@@ -2373,6 +2482,19 @@ namespace AlpWareStudio.Localay
         // Settings that change a translation: a cached one is only reused under the same settings
         private string BuildTranslationCacheContext(string service, string model, string prompt, string gameInfo) =>
             string.Join("\u001F", service, model, GetSourceLanguage(), GetTargetLanguage(), prompt, gameInfo);
+
+        private void EnsureCurrentTranslation(PipelineLifetime.Lease operation, string requestContext, bool requireStarted = true)
+        {
+            operation.ThrowIfStale();
+            string service = ConfigManager.Instance.GetCurrentTranslationService();
+            string prompt = GetLlmPrompt()
+                .Replace("source_language", MapLanguageCode(GetSourceLanguage()))
+                .Replace("target_language", MapLanguageCode(GetTargetLanguage()));
+            string currentContext = BuildTranslationCacheContext(service, ConfigManager.Instance.GetCurrentTranslationModel(),
+                prompt, ConfigManager.Instance.GetGameInfo());
+            if ((requireStarted && !MainWindow.Instance.GetIsStarted()) || currentContext != requestContext)
+                throw new OperationCanceledException(operation.Token);
+        }
 
         // ----- Prefetch: translate new text while waiting for it to settle -----
         // When OCR sees new text the pipeline waits for the next OCR pass to confirm it (the settle time,
@@ -2417,8 +2539,17 @@ namespace AlpWareStudio.Localay
                     return;
 
                 var previousContext = GetPreviousContext();
+                string sourceLanguage = GetSourceLanguage();
+                string targetLanguage = GetTargetLanguage();
+                ITranslationService translationService = TranslationServiceFactory.CreateService(service);
+                var operation = _pipelineLifetime.Capture();
                 _prefetchTexts = texts;
-                _prefetchTask = Task.Run(() => PrefetchTranslationsAsync(texts, mangaMode, prompt, gameInfo, previousContext, cacheContext));
+                _prefetchTask = Task.Run(async () =>
+                {
+                    using (operation)
+                        await PrefetchTranslationsAsync(texts, mangaMode, prompt, gameInfo, previousContext, cacheContext,
+                            translationService, service, sourceLanguage, targetLanguage, operation);
+                });
             }
             catch (Exception ex)
             {
@@ -2427,12 +2558,13 @@ namespace AlpWareStudio.Localay
         }
 
         private async Task PrefetchTranslationsAsync(List<string> texts, bool mangaMode, string prompt, string gameInfo,
-                                                     List<string> previousContext, string cacheContext)
+                                                     List<string> previousContext, string cacheContext, ITranslationService translationService,
+                                                     string service, string sourceLanguage, string targetLanguage, PipelineLifetime.Lease operation)
         {
             var stopwatch = Stopwatch.StartNew();
             try
             {
-                ITranslationService translationService = TranslationServiceFactory.CreateService();
+                operation.ThrowIfStale();
                 var cache = TranslationCache.Instance;
                 int stored = 0;
 
@@ -2443,14 +2575,17 @@ namespace AlpWareStudio.Localay
                     var payload = missing.Select((t, i) => (object)new { id = "prefetch_" + i, text = t }).ToList();
                     OcrTiming.Log("2a. Prefetch request", $"{missing.Count} block(s)");
 
-                    string? response = await translationService.TranslateAsync(BuildTranslationRequestJson(payload, previousContext, gameInfo), prompt);
-                    var translations = string.IsNullOrEmpty(response) ? new Dictionary<string, string>() : ParseTranslationsById(response);
+                    string? response = await TranslationRequestContext.RunAsync(translationService,
+                        BuildTranslationRequestJson(payload, previousContext, gameInfo, sourceLanguage, targetLanguage), prompt, operation.Token);
+                    operation.ThrowIfStale();
+                    var translations = string.IsNullOrEmpty(response) ? new Dictionary<string, string>() : ParseTranslationsById(response, service);
                     for (int i = 0; i < missing.Count; i++)
                     {
                         if (translations.TryGetValue("prefetch_" + i, out string? translated))
                         {
-                            cache.SetIfContext(cacheContext, missing[i], FinalizeTranslation(translated, isCombinedPart: false));
-                            stored++;
+                            if (operation.TryApply(() => cache.SetIfContext(cacheContext, missing[i],
+                                FinalizeTranslation(translated, targetLanguage, isCombinedPart: false))))
+                                stored++;
                         }
                     }
                 }
@@ -2460,8 +2595,10 @@ namespace AlpWareStudio.Localay
                     var payload = new List<object> { new { id = "999", text = string.Join("##|||##", texts) } };
                     OcrTiming.Log("2a. Prefetch request", $"{texts.Count} block(s) combined");
 
-                    string? response = await translationService.TranslateAsync(BuildTranslationRequestJson(payload, previousContext, gameInfo), prompt);
-                    var translations = string.IsNullOrEmpty(response) ? new Dictionary<string, string>() : ParseTranslationsById(response);
+                    string? response = await TranslationRequestContext.RunAsync(translationService,
+                        BuildTranslationRequestJson(payload, previousContext, gameInfo, sourceLanguage, targetLanguage), prompt, operation.Token);
+                    operation.ThrowIfStale();
+                    var translations = string.IsNullOrEmpty(response) ? new Dictionary<string, string>() : ParseTranslationsById(response, service);
                     if (translations.TryGetValue("999", out string? combined))
                     {
                         string[] parts = combined.Split("##|||##");
@@ -2470,14 +2607,19 @@ namespace AlpWareStudio.Localay
                         {
                             for (int i = 0; i < texts.Count; i++)
                             {
-                                cache.SetIfContext(cacheContext, texts[i], FinalizeTranslation(parts[i], isCombinedPart: true));
+                                if (operation.TryApply(() => cache.SetIfContext(cacheContext, texts[i],
+                                    string.IsNullOrWhiteSpace(parts[i]) ? "" : FinalizeTranslation(parts[i], targetLanguage, isCombinedPart: true))))
+                                    stored++;
                             }
-                            stored = texts.Count;
                         }
                     }
                 }
 
                 OcrTiming.Log("2b. Prefetch done", $"{stopwatch.ElapsedMilliseconds} ms, {stored} translation(s) cached");
+            }
+            catch (OperationCanceledException)
+            {
+                Console.WriteLine("Translation prefetch discarded because its session changed.");
             }
             catch (Exception ex)
             {
@@ -2487,7 +2629,7 @@ namespace AlpWareStudio.Localay
 
         // If a prefetch for exactly the current text is still running, wait for it so its result is
         // used instead of sending the same request again
-        private async Task WaitForMatchingPrefetchAsync()
+        private async Task WaitForMatchingPrefetchAsync(CancellationToken cancellation)
         {
             var task = _prefetchTask;
             var texts = _prefetchTexts;
@@ -2498,8 +2640,9 @@ namespace AlpWareStudio.Localay
             OcrTiming.Log("3a. Waiting for the prefetch of this text");
             try
             {
-                await task;
+                await task.WaitAsync(cancellation);
             }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { throw; }
             catch (Exception)
             {
                 // A failed prefetch just means the normal request goes out
@@ -2512,13 +2655,13 @@ namespace AlpWareStudio.Localay
 
         // The same post-processing the normal path applies before it stores a translation, so a
         // prefetched translation is identical to one produced by ProcessTranslatedJSON
-        private static string FinalizeTranslation(string translated, bool isCombinedPart)
+        private static string FinalizeTranslation(string translated, string targetLanguage, bool isCombinedPart)
         {
             if (isCombinedPart)
             {
                 translated = System.Text.RegularExpressions.Regex.Replace(translated, @"\|{3}\s*RST\s*\|{3}|#{0,2}\s*\|{3}\s*#{0,2}", "");
             }
-            if (RtlLanguages.Contains(ConfigManager.Instance.GetTargetLanguage().ToLower()) && !translated.StartsWith('\u200F'))
+            if (RtlLanguages.Contains(targetLanguage.ToLowerInvariant()) && !translated.StartsWith('\u200F'))
             {
                 translated = "\u200F" + translated;
             }
@@ -2527,12 +2670,12 @@ namespace AlpWareStudio.Localay
 
         // id -> translated text from a service response, in either response format
         // ("text_blocks" from LLMs, "translations" from Google Translate / Yandex / Microsoft)
-        private Dictionary<string, string> ParseTranslationsById(string translationResponse)
+        private Dictionary<string, string> ParseTranslationsById(string translationResponse, string service)
         {
             var result = new Dictionary<string, string>();
             try
             {
-                var (innerContent, isTranslationsFormat) = ExtractInnerContentFromResponse(translationResponse);
+                var (innerContent, isTranslationsFormat) = ExtractInnerContentFromResponse(translationResponse, service);
                 if (string.IsNullOrEmpty(innerContent))
                     return result;
 
@@ -2588,12 +2731,12 @@ namespace AlpWareStudio.Localay
             OcrTiming.Log("3. Translation request", $"{service}{modelPart}, {requests} request(s), {chars} chars{(fromCache > 0 ? $", {fromCache} block(s) from cache" : "")}");
         }
 
-        private string BuildTranslationRequestJson(List<object> textBlocks, List<string> previousContext, string gameInfo)
+        private string BuildTranslationRequestJson(List<object> textBlocks, List<string> previousContext, string gameInfo, string sourceLanguage, string targetLanguage)
         {
             var ocrData = new
             {
-                source_language = MapLanguageCode(GetSourceLanguage()),
-                target_language = MapLanguageCode(GetTargetLanguage()),
+                source_language = MapLanguageCode(sourceLanguage),
+                target_language = MapLanguageCode(targetLanguage),
                 text_blocks = textBlocks,
                 previous_context = previousContext,
                 game_info = gameInfo
@@ -2691,6 +2834,7 @@ namespace AlpWareStudio.Localay
                 return null;
             }
 
+            using var operation = _captureLifetime.Capture();
             try
             {
                 Console.WriteLine($"[ClipboardTranslate] Starting translation of {text.Length} chars");
@@ -2738,8 +2882,11 @@ namespace AlpWareStudio.Localay
                 ITranslationService translationService = TranslationServiceFactory.CreateService();
                 string currentService = ConfigManager.Instance.GetCurrentTranslationService();
 
-                // Call the translation API
-                string? translationResponse = await translationService.TranslateAsync(jsonToTranslate, prompt);
+                string requestContext = BuildTranslationCacheContext(currentService,
+                    ConfigManager.Instance.GetCurrentTranslationModel(), prompt, gameInfo);
+                string? translationResponse = await TranslationRequestContext.RunAsync(translationService,
+                    jsonToTranslate, prompt, operation.Token);
+                EnsureCurrentTranslation(operation, requestContext, requireStarted: false);
 
                 if (string.IsNullOrEmpty(translationResponse))
                 {
@@ -2754,6 +2901,7 @@ namespace AlpWareStudio.Localay
 
                 return translatedText;
             }
+            catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
                 Console.WriteLine($"[ClipboardTranslate] Error: {ex.Message}");
@@ -2978,6 +3126,7 @@ namespace AlpWareStudio.Localay
             public double Width { get; set; }
             public double Height { get; set; }
             public double Confidence { get; set; }
+            public List<double> LineHeights { get; set; } = new();
             // Manga speech bubble the block sits in, null when unknown
             public int? BubbleId { get; set; }
         }
@@ -3171,6 +3320,11 @@ namespace AlpWareStudio.Localay
             if (a.BubbleId != null && b.BubbleId != null && a.BubbleId != b.BubbleId)
                 return false;
 
+            // Preserve headings and body text as distinct font-size groups.
+            double sizeA = OverlayFontPolicy.Median(a.LineHeights), sizeB = OverlayFontPolicy.Median(b.LineHeights);
+            if (!OverlayFontPolicy.CanMergeSourceSizes(sizeA, sizeB))
+                return false;
+
             // Larger threshold to better detect adjacent/overlapping text blocks
             double overlapThreshold = 5.0; // pixels
 
@@ -3216,6 +3370,7 @@ namespace AlpWareStudio.Localay
                 Y = Math.Min(a.Y, b.Y),
                 Width = Math.Max(a.X + a.Width, b.X + b.Width) - Math.Min(a.X, b.X),
                 Height = Math.Max(a.Y + a.Height, b.Y + b.Height) - Math.Min(a.Y, b.Y),
+                LineHeights = a.LineHeights.Concat(b.LineHeights).ToList(),
                 Confidence = Math.Min(a.Confidence, b.Confidence),
                 BubbleId = a.BubbleId ?? b.BubbleId
             };

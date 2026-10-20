@@ -58,7 +58,7 @@ namespace AlpWareStudio.Localay
 
         private static HttpClient CreateSharedHttpClient()
         {
-            var client = new HttpClient
+            var client = new HttpClient(new TranslationHttpHandler())
             {
                 Timeout = TimeSpan.FromMilliseconds(FreeRequestTimeoutMs)
             };
@@ -82,18 +82,19 @@ namespace AlpWareStudio.Localay
         {
             bool canHedge = !_useCloudApi && IsFallbackServiceAvailable() && !_freeClient.IsCoolingDown;
             if (!canHedge)
-                return await TranslateWithGoogleAsync(jsonData, prompt, allowFallback: true, CancellationToken.None);
+                return await TranslateWithGoogleAsync(jsonData, prompt, allowFallback: true, TranslationRequestContext.Cancellation);
 
-            using var cancelGoogle = new CancellationTokenSource();
+            using var cancelGoogle = CancellationTokenSource.CreateLinkedTokenSource(TranslationRequestContext.Cancellation);
             Task<string?> googleTask = TranslateWithGoogleAsync(jsonData, prompt, allowFallback: false, cancelGoogle.Token);
 
-            if (await Task.WhenAny(googleTask, Task.Delay(HedgeDelayMs)) == googleTask)
+            if (await Task.WhenAny(googleTask, Task.Delay(HedgeDelayMs, TranslationRequestContext.Cancellation)) == googleTask)
             {
                 string? fast = await googleTask;
                 // Google failed (rate limited, every endpoint down, ...): the fallback still gets the line on screen
                 return fast ?? await TranslateWithFallbackAsync(jsonData, prompt, "Google Translate failed");
             }
 
+            TranslationRequestContext.Cancellation.ThrowIfCancellationRequested();
             Task<string?> fallbackTask = TranslateWithFallbackAsync(jsonData, prompt, $"Google Translate has not answered after {HedgeDelayMs} ms");
             Task<string?> first = await Task.WhenAny(googleTask, fallbackTask);
             string? result = await first;
@@ -276,6 +277,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error in GoogleTranslateService: {ex.Message}");
                 return null;
             }
@@ -314,7 +316,7 @@ namespace AlpWareStudio.Localay
 
                 if (translatableParts.Count == 0)
                 {
-                    return texts.Select(t => (t, false)).ToList();
+                    return texts.Select(t => ("", false)).ToList();
                 }
 
                 List<string?> translatedBatch;
@@ -327,33 +329,15 @@ namespace AlpWareStudio.Localay
                     translatedBatch = await TranslateFreePartsBatchedAsync(translatableParts, sourceLanguage, targetLanguage, cancellationToken);
                 }
 
+                if (translatedBatch.Count != translatableParts.Count)
+                {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidResponse));
+                    return texts.Select(t => ("", false)).ToList();
+                }
                 var results = new List<(string Text, bool Success)>(texts.Count);
                 for (int t = 0; t < texts.Count; t++)
                 {
-                    string[] parts = originalParts[t];
-                    int[] partMap = partMaps[t];
-                    var translatedParts = new string[parts.Length];
-                    bool anyTranslated = false;
-
-                    for (int i = 0; i < parts.Length; i++)
-                    {
-                        int translatedIndex = partMap[i];
-                        string? translatedPart = translatedIndex >= 0 && translatedIndex < translatedBatch.Count
-                            ? translatedBatch[translatedIndex]
-                            : null;
-
-                        if (string.IsNullOrWhiteSpace(translatedPart))
-                        {
-                            translatedParts[i] = parts[i];
-                        }
-                        else
-                        {
-                            translatedParts[i] = translatedPart;
-                            anyTranslated = true;
-                        }
-                    }
-
-                    results.Add((string.Join(CombinedBlockSeparator, translatedParts), anyTranslated));
+                    results.Add(TranslationParts.Reassemble(partMaps[t], translatedBatch));
                 }
 
                 Console.WriteLine($"Google Translate: {texts.Count} block(s), {translatableParts.Count} part(s) translated together");
@@ -361,8 +345,9 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error preserving Google Translate separators: {ex.Message}");
-                return texts.Select(t => (t, false)).ToList();
+                return texts.Select(t => ("", false)).ToList();
             }
         }
 
@@ -446,6 +431,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Google Translate fallback ({fallback}) failed: {ex.Message}");
                 return null;
             }
@@ -488,6 +474,7 @@ namespace AlpWareStudio.Localay
 
                 if (string.IsNullOrEmpty(_apiKey))
                 {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
                     Console.WriteLine("Google Translate API key is not configured");
                     return texts.Select(_ => (string?)null).ToList();
                 }
@@ -503,7 +490,7 @@ namespace AlpWareStudio.Localay
 
                 string jsonRequest = JsonSerializer.Serialize(requestBody);
                 var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(url, content);
+                var response = await _httpClient.PostAsync(url, content, TranslationRequestContext.Cancellation);
 
                 if (!response.IsSuccessStatusCode)
                 {
@@ -511,7 +498,7 @@ namespace AlpWareStudio.Localay
                     return texts.Select(_ => (string?)null).ToList();
                 }
 
-                string jsonResponse = await response.Content.ReadAsStringAsync();
+                string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                 using JsonDocument doc = JsonDocument.Parse(jsonResponse);
 
                 if (doc.RootElement.TryGetProperty("data", out JsonElement data) &&
@@ -534,6 +521,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error batching Google Cloud translations: {ex.Message}");
                 return texts.Select(_ => (string?)null).ToList();
             }

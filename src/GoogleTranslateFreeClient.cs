@@ -19,6 +19,7 @@ namespace AlpWareStudio.Localay
         private DateTime _cooldownUntilUtc = DateTime.MinValue;
         // Consecutive 429s without a Retry-After header; drives our own backoff.
         private int _rateLimitStrikes;
+        private TranslationFailureKind _cooldownKind = TranslationFailureKind.RateLimited;
         private static readonly TimeSpan MinRateLimitCooldown = TimeSpan.FromSeconds(30);
         private static readonly TimeSpan MaxRateLimitCooldown = TimeSpan.FromMinutes(5);
         // Spacing between requests. 200 ms (5 req/s) was enough to get an IP rate limited.
@@ -30,7 +31,15 @@ namespace AlpWareStudio.Localay
         /// </summary>
         internal bool IsCoolingDown
         {
-            get { lock (_throttleLock) return DateTime.UtcNow < _cooldownUntilUtc; }
+            get
+            {
+                lock (_throttleLock)
+                {
+                    bool cooling = DateTime.UtcNow < _cooldownUntilUtc;
+                    if (cooling) TranslationRequestContext.ReportFailure(new(_cooldownKind, _cooldownUntilUtc - DateTime.UtcNow));
+                    return cooling;
+                }
+            }
         }
         private string? _seed;
         private DateTime _seedRefreshAfterUtc = DateTime.MinValue;
@@ -67,7 +76,10 @@ namespace AlpWareStudio.Localay
                         try
                         {
                             if (!await ThrottleAsync(requestCts.Token))
+                            {
+                                _ = IsCoolingDown;
                                 return null;
+                            }
                             using var request = CreateRequest(url);
                             if (endpoint == 1)
                                 request.Headers.Referrer = new Uri(WebOrigin);
@@ -131,7 +143,8 @@ namespace AlpWareStudio.Localay
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                Console.WriteLine("Google Translate free translation budget exhausted.");
+                if (!TranslationRequestContext.Cancellation.IsCancellationRequested)
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Timeout));
             }
             return null;
         }
@@ -234,6 +247,7 @@ namespace AlpWareStudio.Localay
             }
             lock (_throttleLock)
             {
+                _cooldownKind = TranslationFailureKind.RateLimited;
                 _rateLimitStrikes++;
                 double seconds = MinRateLimitCooldown.TotalSeconds * Math.Pow(2, Math.Min(_rateLimitStrikes - 1, 10));
                 var cooldown = TimeSpan.FromSeconds(Math.Min(seconds, MaxRateLimitCooldown.TotalSeconds));
@@ -254,6 +268,7 @@ namespace AlpWareStudio.Localay
             // Honor server cooldown across blocks/calls without keeping the UI waiting.
             lock (_throttleLock)
             {
+                _cooldownKind = TranslationFailure.FromStatus(response).Kind;
                 DateTime until = DateTime.UtcNow.Add(delay.Value);
                 if (until > _cooldownUntilUtc)
                     _cooldownUntilUtc = until;

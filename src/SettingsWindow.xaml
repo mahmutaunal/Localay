@@ -482,8 +482,8 @@
                             <ComboBoxItem Content="he" />
                         </ComboBox>
                         <TextBlock x:Name="checkLanguagePack" Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Lbl_CheckLanguagePack]}" Grid.Row="2" Grid.Column="0" VerticalAlignment="Center" Margin="0,0,10,0" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tip_CheckLanguagePack]}" TextWrapping="Wrap" MaxWidth="200" />
-                        <Button x:Name="checkLanguagePackButton" Grid.Row="2" Grid.Column="1" Width="60" Margin="10,0" Click="CheckLanguagePackButton_Click">
-                            <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Check]}" />
+                        <Button x:Name="checkLanguagePackButton" Grid.Row="2" Grid.Column="1" HorizontalAlignment="Left" Padding="12,6" Margin="10,0" Click="CheckLanguagePackButton_Click">
+                            <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[OcrSetup_Open]}" />
                         </Button>
                     </Grid>
                 </GroupBox>
@@ -1135,7 +1135,7 @@
                                         <GridViewColumn Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Col_MatchType]}" Width="140">
                                             <GridViewColumn.CellTemplate>
                                                 <DataTemplate>
-                                                    <ComboBox ItemsSource="{Binding Source={x:Reference settingsWindow}, Path=MatchTypeOptions}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding MatchType}" SelectionChanged="IgnorePhraseMatchType_SelectionChanged" />
+                                                    <ComboBox ItemsSource="{Binding MatchTypeOptions, RelativeSource={RelativeSource AncestorType={x:Type local:SettingsWindow}}}" DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding MatchType}" SelectionChanged="IgnorePhraseMatchType_SelectionChanged" />
                                                 </DataTemplate>
                                             </GridViewColumn.CellTemplate>
                                         </GridViewColumn>

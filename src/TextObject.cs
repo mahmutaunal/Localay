@@ -68,6 +68,44 @@ namespace AlpWareStudio.Localay
         // Whether the text fit the original box height at the chosen font size
         public bool TextFitsBox { get; private set; } = true;
 
+        private OverlayPixelGeometry? _captureGeometry;
+        private double _renderScaleX = 1, _renderScaleY = 1;
+        private Rect? _eraserPixelBounds;
+        internal double SourceLineHeight { get; private set; }
+        // Render hosts/tests may supply immutable options without initializing application settings.
+        internal OverlayTextOptions? OptionsOverride { get; init; }
+        private bool _allowFontShrink;
+        private OverlayTextOptions Options => OptionsOverride ?? new(
+            ConfigManager.Instance.IsAutoSizeTextBlocksEnabled(), ConfigManager.Instance.IsAutoSetOverlayBackground(),
+            ConfigManager.Instance.IsLanguageFontOverrideEnabled() ? ConfigManager.Instance.GetLanguageFontFamily() : DefaultFontFamily,
+            ConfigManager.Instance.GetLanguageFontSizeMin(), ConfigManager.Instance.GetLanguageFontSizeMax());
+
+        internal void BindCaptureGeometry(OverlayPixelGeometry pixels, double scaleX, double scaleY)
+        {
+            _captureGeometry = pixels;
+            ApplyRenderDpi(scaleX, scaleY, force: true);
+        }
+
+        internal void ApplyRenderDpi(double scaleX, double scaleY, bool force = false)
+        {
+            if (_captureGeometry is not { } pixels) return;
+            scaleX = OverlayPixelGeometry.ValidScale(scaleX);
+            scaleY = OverlayPixelGeometry.ValidScale(scaleY);
+            if (!force && scaleX == _renderScaleX && scaleY == _renderScaleY) return;
+            _renderScaleX = scaleX; _renderScaleY = scaleY;
+            var logical = pixels.ToDips(scaleX, scaleY);
+            X = logical.X; Y = logical.Y; Width = logical.Width; Height = logical.Height;
+            SourceLineHeight = logical.LineHeight;
+            if (EraserElement != null && _eraserPixelBounds is Rect patch)
+            {
+                EraserElement.Width = patch.Width / scaleX;
+                EraserElement.Height = patch.Height / scaleY;
+                _eraserOffset = new Vector(patch.X / scaleX - X, patch.Y / scaleY - Y);
+                PositionEraser();
+            }
+            if (TextBlock != null) UpdateUIElement();
+        }
+
         // Feather width (DIPs) of the background edge when overlay colors are sampled automatically
         private const double SoftEdgeRadius = 6;
         // Glow around translated text drawn directly on the erased background
@@ -131,39 +169,20 @@ namespace AlpWareStudio.Localay
                 // Use Margin for positioning in the parent container
                 Border.Margin = new Thickness(X, Y, 0, 0);
             }
-            if(ConfigManager.Instance.IsLanguageFontOverrideEnabled())
+            TextBlock = new TextBlock
             {
-                TextBlock = new TextBlock()
-                {
-                    Text = this.Text,
-                    Foreground = this.TextColor,
-                    FontWeight = FontWeights.Normal,
-                    FontSize = 24, // Increased from 18 to 24 for better initial size
-                    TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Left, // Changed from Justify for better readability of merged blocks
-                    FontStretch = FontStretches.Normal, // Changed from Expanded for better readability
-                    FontFamily = new FontFamily(ConfigManager.Instance.GetLanguageFontFamily()),
-                    Margin = new Thickness(0), // Increased margin for better text display
-                    TextTrimming = TextTrimming.None
-                };
-            }
-            else
-            {
-                // Create the text block with adjusted properties for better horizontal fill
-                TextBlock = new TextBlock()
-                {
-                    Text = this.Text,
-                    Foreground = this.TextColor,
-                    FontWeight = FontWeights.Normal,
-                    FontSize = 24, // Increased from 18 to 24 for better initial size
-                    TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Left, // Changed from Justify for better readability of merged blocks
-                    FontStretch = FontStretches.Normal, // Changed from Expanded for better readability
-                    FontFamily = new FontFamily(DefaultFontFamily),
-                    Margin = new Thickness(0), // Increased margin for better text display
-                    TextTrimming = TextTrimming.None
-                };
-            }
+                Text = string.IsNullOrWhiteSpace(TextTranslated) ? Text : TextTranslated,
+                Foreground = TextColor,
+                FlowDirection = FlowDirection,
+                FontWeight = FontWeights.Normal,
+                FontSize = 24,
+                TextWrapping = TextWrapping.Wrap,
+                TextAlignment = TextAlignment.Left,
+                FontStretch = FontStretches.Normal,
+                FontFamily = new FontFamily(Options.FontFamily),
+                Margin = new Thickness(0),
+                TextTrimming = TextTrimming.None
+            };
 
             ResetLayout();
             ApplyBoxConstraints();
@@ -233,17 +252,7 @@ namespace AlpWareStudio.Localay
                 // New text: start again from the original box; the overlay layout pass re-widens if needed
                 ResetLayout();
                 ApplyBoxConstraints();
-                if(ConfigManager.Instance.IsLanguageFontOverrideEnabled())
-                {
-                    TextBlock.FontFamily = new FontFamily(ConfigManager.Instance.GetLanguageFontFamily());
-                }
-                else 
-                {
-                    TextBlock.FontFamily = new FontFamily(DefaultFontFamily);
-                }
-
-                // Reset font size to default and then adjust if needed
-                TextBlock.FontSize = 24; // Increased from 18 to 24 for better initial size
+                TextBlock.FontFamily = new FontFamily(Options.FontFamily);
                 AdjustFontSize(Border, TextBlock);
             }
         }
@@ -262,6 +271,8 @@ namespace AlpWareStudio.Localay
                 Stretch = Stretch.Fill,
                 IsHitTestVisible = false
             };
+            _eraserPixelBounds = new Rect(bounds.X * _renderScaleX, bounds.Y * _renderScaleY,
+                bounds.Width * _renderScaleX, bounds.Height * _renderScaleY);
             // Relative to the text position, so it follows when text objects are shifted
             _eraserOffset = new Vector(bounds.X - X, bounds.Y - Y);
         }
@@ -281,7 +292,7 @@ namespace AlpWareStudio.Localay
         private void ApplyBackground()
         {
             bool erased = EraserElement != null;
-            bool soft = !erased && _softBackground != null && ConfigManager.Instance.IsAutoSetOverlayBackground();
+            bool soft = !erased && _softBackground != null && Options.AutoBackground;
             Border.Background = erased || soft ? null : BackgroundColor;
             if (_softBackground != null)
             {
@@ -304,6 +315,7 @@ namespace AlpWareStudio.Localay
         {
             LayoutWidth = Width;
             MinSourceSizeRatio = DefaultMinSourceSizeRatio;
+            _allowFontShrink = false;
         }
 
         private void ApplyBoxConstraints()
@@ -326,24 +338,28 @@ namespace AlpWareStudio.Localay
         }
 
         // Re-fit the text with a wider wrap width and/or a lower minimum font size (used by the overlay layout pass)
-        public void Relayout(double layoutWidth, double minSourceSizeRatio)
+        public void Relayout(double layoutWidth, double minSourceSizeRatio, bool allowShrink = false)
         {
             if (TextBlock == null) return;
             LayoutWidth = Math.Max(Width, layoutWidth);
             MinSourceSizeRatio = minSourceSizeRatio;
+            _allowFontShrink = allowShrink;
             ApplyBoxConstraints();
             AdjustFontSize(Border, TextBlock);
         }
 
         // Static cache for font size calculations
-        private static readonly Dictionary<string, (double Size, bool Fits)> _fontSizeCache = new Dictionary<string, (double Size, bool Fits)>();
+        private readonly record struct FontLayoutKey(string Text, string Family, FontWeight Weight, System.Windows.FontStyle Style,
+            FontStretch Stretch, System.Windows.FlowDirection Direction, string Language, string Culture, double Dpi, double RenderScale,
+            double Width, double Height, double Preferred, double Minimum, bool Shrink);
+        private static readonly Dictionary<FontLayoutKey, (double Size, bool Fits)> _fontSizeCache = new();
         public static void ClearCache()
         {
             _fontSizeCache.Clear();
         }
 
         // Line spacing as a multiple of font size; WPF's default (~1.3x) wastes space in small boxes
-        private const double LineHeightRatio = 1.15;
+        private const double LineHeightRatio = OverlayFontPolicy.LineHeightRatio;
         // The translation may shrink to this fraction of the estimated source font size, no smaller
         public const double DefaultMinSourceSizeRatio = 0.6;
 
@@ -363,29 +379,13 @@ namespace AlpWareStudio.Localay
             return textBlock.DesiredSize.Height <= Height && textBlock.DesiredSize.Width <= LayoutWidth;
         }
 
-        // Binary search for the largest font size in [minSize, maxSize] that fits; minSize if none does
-        private double FindLargestFittingSize(TextBlock textBlock, double minSize, double maxSize)
-        {
-            if (FitsAt(textBlock, maxSize)) return maxSize;
-            if (!FitsAt(textBlock, minSize)) return minSize;
-
-            double fits = minSize, tooBig = maxSize;
-            while (tooBig - fits > 0.5)
-            {
-                double mid = (fits + tooBig) / 2;
-                if (FitsAt(textBlock, mid)) fits = mid;
-                else tooBig = mid;
-            }
-            return fits;
-        }
-
         // Size the text to fill the original text box, staying close to the game's own font size
         private void AdjustFontSize(Border border, TextBlock textBlock)
         {
             try
             {
                 // Check if auto sizing is enabled
-                if (!ConfigManager.Instance.IsAutoSizeTextBlocksEnabled())
+                if (!Options.AutoSize)
                 {
                     // Fixed font size; still report whether it fits so the layout pass can widen the box
                     TextFitsBox = Width <= 0 || Height <= 0 || FitsAt(textBlock, 24);
@@ -401,12 +401,16 @@ namespace AlpWareStudio.Localay
                     return;
                 }
 
-                double configMin = ConfigManager.Instance.GetLanguageFontSizeMin();
-                double configMax = ConfigManager.Instance.GetLanguageFontSizeMax();
-                if (configMin > configMax) (configMin, configMax) = (configMax, configMin);
-
-                // Same length doesn't mean same rendered size, so key on the actual text and font
-                string cacheKey = $"{textBlock.FontFamily.Source}_{Width}_{LayoutWidth}_{Height}_{MinSourceSizeRatio}_{configMin}_{configMax}_{Text}_{textBlock.Text}";
+                var options = Options;
+                var (configMin, configMax) = OverlayFontPolicy.Bounds(options.Minimum, options.Maximum);
+                double lineHeight = SourceLineHeight > 0 ? SourceLineHeight :
+                    OverlayFontPolicy.SourceLineHeight(Width, Height, Text);
+                double preferred = OverlayFontPolicy.PreferredSize(lineHeight, configMin, configMax);
+                double minimum = Math.Min(preferred, Math.Max(configMin, preferred * MinSourceSizeRatio));
+                var cacheKey = new FontLayoutKey(textBlock.Text, textBlock.FontFamily.Source, textBlock.FontWeight,
+                    textBlock.FontStyle, textBlock.FontStretch, textBlock.FlowDirection, textBlock.Language.IetfLanguageTag,
+                    System.Globalization.CultureInfo.CurrentCulture.Name, VisualTreeHelper.GetDpi(textBlock).PixelsPerDip,
+                    _renderScaleY, LayoutWidth, Height, preferred, minimum, _allowFontShrink);
 
                 // Check cache
                 if (_fontSizeCache.TryGetValue(cacheKey, out var cached))
@@ -416,26 +420,10 @@ namespace AlpWareStudio.Localay
                     return;
                 }
 
-                // Estimate the game's font size: the largest size at which the source text fills its own box
-                var sourceProbe = new TextBlock
-                {
-                    Text = Text,
-                    FontFamily = textBlock.FontFamily,
-                    FontWeight = textBlock.FontWeight,
-                    TextWrapping = TextWrapping.Wrap
-                };
-                // The source filled the original box, so measure it at the original width
-                double layoutWidth = LayoutWidth;
-                LayoutWidth = Width;
-                double sourceSize = FindLargestFittingSize(sourceProbe, 1, configMax);
-                LayoutWidth = layoutWidth;
-
-                // Keep the translation readable relative to the source and no larger than it
-                double minSize = Math.Min(configMax, Math.Max(configMin, sourceSize * MinSourceSizeRatio));
-                double maxSize = Math.Max(minSize, Math.Min(configMax, sourceSize));
-
-                // If even minSize overflows, the border grows downward (MinHeight + infinite MaxHeight)
-                double finalSize = FindLargestFittingSize(textBlock, minSize, maxSize);
+                // Keep a stable source-derived size while trying space/wrapping first. Shrink
+                // only when the overlay placement pass explicitly runs out of vertical room.
+                double finalSize = OverlayFontPolicy.ChooseSize(preferred, minimum, _allowFontShrink,
+                    size => FitsAt(textBlock, size));
                 TextFitsBox = FitsAt(textBlock, finalSize);
                 textBlock.VerticalAlignment = VerticalAlignment.Stretch;
                 ApplyFontSize(textBlock, finalSize);
@@ -447,7 +435,7 @@ namespace AlpWareStudio.Localay
             catch (Exception ex)
             {
                 Console.WriteLine($"Error in AdjustFontSize: {ex.Message}");
-                TextFitsBox = true;
+                TextFitsBox = false;
                 ApplyFontSize(textBlock, 24);
             }
         }

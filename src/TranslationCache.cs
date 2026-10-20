@@ -82,8 +82,9 @@ namespace AlpWareStudio.Localay
             {
                 if (context != _context)
                     return;
+                // The context check and write must be atomic with UseContext.
+                Set(text, translation);
             }
-            Set(text, translation);
         }
 
         public string Context

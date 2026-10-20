@@ -151,7 +151,6 @@ namespace AlpWareStudio.Localay
     {
         private static SettingsWindow? _instance;
 
-        public static bool _isLanguagePackInstall = false;
 
         public string profileName = "";
 
@@ -167,27 +166,30 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        public SettingsWindow()
+        public SettingsWindow() : this(initializeRuntime: true) { }
+
+        // Load the complete production BAML in a bare WPF host without starting capture,
+        // creating MainWindow/ConfigManager, or accessing the user's profiles.
+        internal SettingsWindow(bool initializeRuntime)
         {
             // Make sure the initialization flag is set before anything else
             _isInitializing = true;
             Console.WriteLine("SettingsWindow constructor: Setting _isInitializing to true");
 
             InitializeComponent();
-            InitializeGeneralPreferences();
             var languageTemplate = (DataTemplate)FindResource("SettingsLanguageTemplate");
             foreach (var combo in new[] { sourceLanguageComboBox, targetLanguageComboBox })
                 foreach (var item in combo.Items.OfType<ComboBoxItem>()) item.ContentTemplate = languageTemplate;
+            InitializeHotkeyRows();
+            if (!initializeRuntime) return;
+
+            InitializeGeneralPreferences();
             foreach (var item in ocrMethodComboBox.Items.OfType<ComboBoxItem>())
                 if (item.Content?.ToString() == "OneOCR") item.IsEnabled = NativeOcrAssets.IsAvailable;
-            _instance = this;
-            InitializeHotkeyRows();
             LocalizationManager.Instance.PropertyChanged += (s, e) => MatchTypeOptions.ForEach(option => option.RefreshText());
             // The list follows changes made anywhere: hotkey selection, profile load, Settings buttons
             MainWindow.Instance.ExcludeRegionsChanged += (s, e) => LoadExcludeRegions();
             LocalizationManager.Instance.PropertyChanged += (s, e) => LoadExcludeRegions();
-            LoadAvailableScreens();
-            LoadAllProfile();
 
             // Add Loaded event handler to ensure controls are initialized
             this.Loaded += SettingsWindow_Loaded;
@@ -241,13 +243,13 @@ namespace AlpWareStudio.Localay
 
         private void InterfaceLanguagePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_syncingGeneralPreferences || SelectedTag(interfaceLanguageComboBox) is not string code) return;
+            if (_isInitializing || _syncingGeneralPreferences || SelectedTag(interfaceLanguageComboBox) is not string code) return;
             ApplicationPreferences.SetLanguagePreference(code);
         }
 
         private void AppearancePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_syncingGeneralPreferences || SelectedTag(appearanceComboBox) is not string theme) return;
+            if (_isInitializing || _syncingGeneralPreferences || SelectedTag(appearanceComboBox) is not string theme) return;
             MainWindow.Instance.ApplyThemePreference(theme);
         }
 
@@ -263,10 +265,7 @@ namespace AlpWareStudio.Localay
         public void ReloadSetting()
         {
             _instance = this;
-            LoadAvailableScreens();
-            LoadAllProfile();
-
-            SettingsWindow_Loaded(null, null);
+            LoadSettings();
             ApplicationPreferences.Refresh();
             RefreshGeneralPreferences();
         }
@@ -278,7 +277,7 @@ namespace AlpWareStudio.Localay
         private bool isNeedShowWarningAutoOCR = false;
 
         // Flag to prevent saving during initialization
-        private static bool _isInitializing = true;
+        private bool _isInitializing = true;
 
         // Collection to hold the ignore phrases
         private ObservableCollection<IgnorePhrase> _ignorePhrases = new ObservableCollection<IgnorePhrase>();
@@ -290,7 +289,20 @@ namespace AlpWareStudio.Localay
             new MatchTypeOption(IgnorePhraseMatchType.RegularExpression, "Cmb_MatchType_RegularExpression"),
         };
 
+        private bool _settingsLoaded;
+
         private void SettingsWindow_Loaded(object? sender, RoutedEventArgs? e)
+        {
+            if (_settingsLoaded) return;
+            try { LoadSettings(); }
+            catch (Exception ex)
+            {
+                Hide();
+                SettingsWindowError.Show(MainWindow.Instance, ex);
+            }
+        }
+
+        private void LoadSettings()
         {
             try
             {
@@ -298,6 +310,9 @@ namespace AlpWareStudio.Localay
 
                 // Set initialization flag to prevent saving during setup
                 _isInitializing = true;
+
+                LoadAvailableScreens();
+                LoadAllProfile();
 
                 // Make sure keyboard shortcuts work from this window too
                 PreviewKeyDown -= Application_KeyDown;
@@ -329,23 +344,11 @@ namespace AlpWareStudio.Localay
                     screenComboBox.SelectedIndex = 0;
                 }
 
-                // Now that initialization is complete, allow saving changes
-                _isInitializing = false;
-
-                // Force the OCR method and translation service to match the config again
-                // This ensures the config values are preserved and not overwritten
-                string configOcrMethod = ConfigManager.Instance.GetOcrMethod();
-                string configTransService = ConfigManager.Instance.GetCurrentTranslationService();
-                Console.WriteLine($"Ensuring config values are preserved: OCR={configOcrMethod}, Translation={configTransService}");
-
-                ConfigManager.Instance.SetOcrMethod(configOcrMethod);
-                ConfigManager.Instance.SetTranslationService(configTransService);
-
                 Console.WriteLine("Settings window fully loaded and initialized. Changes will now be saved.");
+                _settingsLoaded = true;
             }
-            catch (Exception ex)
+            finally
             {
-                Console.WriteLine($"Error initializing Settings window: {ex.Message}");
                 _isInitializing = false; // Ensure we don't get stuck in initialization mode
             }
         }
@@ -1057,13 +1060,21 @@ namespace AlpWareStudio.Localay
             foreach (var row in _hotkeyRows)
             {
                 row.Hotkey = ConfigManager.Instance.GetHotKey(row.FunctionName);
-
-                if (MainWindow.Instance.FindName(row.MainWindowLabelName) is TextBlock mainWindowLabel)
-                {
-                    mainWindowLabel.Text = row.HasHotkey ? KeyboardShortcuts.FormatForDisplay(row.Hotkey) : "—";
-                }
             }
+            RefreshMainWindowHotkeys();
             UpdateHotkeyConflicts();
+        }
+
+        // Startup must not construct Settings just to display shortcuts: a Settings load
+        // failure would otherwise abort the remaining MainWindow initialization.
+        internal static void RefreshMainWindowHotkeys()
+        {
+            foreach (var (function, _, label) in HotkeyRowDefinitions)
+            {
+                string hotkey = ConfigManager.Instance.GetHotKey(function);
+                if (MainWindow.Instance.FindName(label) is TextBlock mainWindowLabel)
+                    mainWindowLabel.Text = string.IsNullOrEmpty(hotkey) ? "—" : KeyboardShortcuts.FormatForDisplay(hotkey);
+            }
         }
 
         private void UpdateHotkeyConflicts()
@@ -2143,6 +2154,7 @@ namespace AlpWareStudio.Localay
 
         private void MicrosoftLegacyModeCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             try
             {
                 bool enabled = microsoftLegacyModeCheckBox.IsChecked ?? false;
@@ -3092,66 +3104,8 @@ namespace AlpWareStudio.Localay
 
         private void CheckLanguagePackButton_Click(object sender, RoutedEventArgs e)
         {
-            string? sourceLanguage = null;
-
-            if (sourceLanguageComboBox.SelectedItem is ComboBoxItem selectedItem)
-            {
-                sourceLanguage = selectedItem.Content.ToString();
-            }
-            if (string.IsNullOrEmpty(sourceLanguage))
-            {
-                _isLanguagePackInstall = false;
-
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_NoLanguageSelected"],
-                    LocalizationManager.Instance.Strings["Title_LanguagePackCheck"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Warning
-                );
-            }
-            else
-            {
-                Console.WriteLine($"Checking language pack for: {sourceLanguage}");
-
-                _isLanguagePackInstall = WindowsOCRManager.Instance.CheckLanguagePackInstall(sourceLanguage);
-
-                if (_isLanguagePackInstall)
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_LanguagePackInstalled"],
-                        LocalizationManager.Instance.Strings["Title_LanguagePackCheck"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning
-                    );
-                }
-                else
-                {
-                    if (!string.IsNullOrEmpty(WindowsOCRManager.Instance._currentLanguageCode))
-                    {
-                        string message = string.Format(
-                            LocalizationManager.Instance.Strings["Msg_LanguagePackInstallGuide"],
-                            WindowsOCRManager.Instance._currentLanguageCode
-                        );
-
-                        MessageBox.Show(
-                            message,
-                            LocalizationManager.Instance.Strings["Title_LanguagePackCheck"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning
-                        );
-                    }
-                    else
-                    {
-                        MessageBox.Show(
-                            LocalizationManager.Instance.Strings["Msg_LanguageNotSupported"],
-                            LocalizationManager.Instance.Strings["Title_LanguagePackCheck"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning
-                        );
-                    }
-                }
-            }
-
+            if (sourceLanguageComboBox.SelectedItem is ComboBoxItem selected && selected.Content is string source)
+                OcrLanguageSetupWindow.ShowFor(this, source);
         }
 
         private void CreateProfileButton_Click(object sender, RoutedEventArgs e)
@@ -3860,6 +3814,7 @@ namespace AlpWareStudio.Localay
 
         private void ShowIconSignal_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool enabled = showIconSignalCheckBox.IsChecked ?? false;
             ConfigManager.Instance.SetShowIconSignal(enabled);
             Console.WriteLine($"Show icon signal set to {enabled}");
@@ -3876,6 +3831,7 @@ namespace AlpWareStudio.Localay
         // Handle Multi selection area checkbox change for multi selection area
         private void MultiSelectionAreaCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool enabled = multiSelectionAreaCheckBox.IsChecked ?? false;
             ConfigManager.Instance.SetUseMultiSelectionArea(enabled);
             Console.WriteLine($"Settings window: Multi selection area set to {enabled}");
@@ -3911,6 +3867,7 @@ namespace AlpWareStudio.Localay
 
         private void AutoOCRCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool enabled = AutoOCRCheckBox.IsChecked ?? true;
             ConfigManager.Instance.SetAutoOCR(enabled);
             Console.WriteLine($"Auto OCR set to {enabled}");
@@ -3929,6 +3886,7 @@ namespace AlpWareStudio.Localay
 
         private void AutoSetOverlayBackgroundColorcheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool enabled = autoSetOverlayBackgroundColorcheckBox.IsChecked ?? true;
             ConfigManager.Instance.SetAutoSetOverlayBackground(enabled);
             Console.WriteLine($"Auto set overlay background color set to {enabled}");
@@ -3936,6 +3894,7 @@ namespace AlpWareStudio.Localay
 
         private void AutoMergeOverlappingTextCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool enabled = autoMergeOverlappingTextCheckBox.IsChecked ?? true;
             ConfigManager.Instance.SetAutoMergeOverlappingText(enabled);
             Console.WriteLine($"Auto merge overlapping text set to {enabled}");

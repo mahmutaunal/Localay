@@ -97,6 +97,11 @@ namespace AlpWareStudio.Localay
 
             // Add location changed handler to update DPI scale when window moves between monitors
             this.LocationChanged += MonitorWindow_LocationChanged;
+            this.DpiChanged += (_, _) =>
+            {
+                TextObject.ClearCache();
+                RefreshOverlays();
+            };
 
             // Add size changed handler to update scrollbars
             // this.SizeChanged += MonitorWindow_SizeChanged;
@@ -487,12 +492,17 @@ namespace AlpWareStudio.Localay
         {
             try
             {
+                if (!Logic.Instance.AreOverlaysCurrent) return;
                 // Check for null references
                 if (textObject == null || textOverlayCanvas == null)
                 {
                     Console.WriteLine("Warning: TextObject or Canvas is null in OnTextObjectAdded");
                     return;
                 }
+
+                // Missing translations must leave the application's original text visible.
+                if (MainWindow.Instance.GetTranslateEnabled() && string.IsNullOrWhiteSpace(textObject.TextTranslated))
+                    return;
 
                 // We need to create a NEW UI element with positioning appropriate for Canvas
                 // but we'll use the existing Border and TextBlock references so updates work
@@ -583,6 +593,13 @@ namespace AlpWareStudio.Localay
                 
                 // Clear canvas
                 textOverlayCanvas.Children.Clear();
+
+                // A response for the previous screen must not bring its boxes/backgrounds back.
+                if (!Logic.Instance.AreOverlaysCurrent)
+                {
+                    DrawExcludeRegions();
+                    return;
+                }
                 
                 // Check if Logic is initialized
                 if (Logic.Instance == null)
@@ -598,12 +615,13 @@ namespace AlpWareStudio.Localay
                     return;
                 }
                 
-                // Re-add all current text objects
+                DpiHelper.GetWindowRenderDpi(this, out double renderScaleX, out double renderScaleY);
+                // Re-add all current text objects, converting original pixels at the current DPI.
                 foreach (TextObject textObj in textObjects)
                 {
                     if (textObj != null)
                     {
-                        // Call our OnTextObjectAdded method to add it to the canvas
+                        textObj.ApplyRenderDpi(renderScaleX, renderScaleY);
                         CreateMonitorOverlayFromTextObject(this, textObj);
                     }
                 }
@@ -684,7 +702,7 @@ namespace AlpWareStudio.Localay
 
                     if (box.Bottom > overlayHeight)
                     {
-                        item.Relayout(item.LayoutWidth, LastResortMinSourceSizeRatio);
+                        item.Relayout(item.LayoutWidth, LastResortMinSourceSizeRatio, allowShrink: true);
                         box = PlaceBelowOverlaps(item, placed);
                     }
 

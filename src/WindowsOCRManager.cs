@@ -29,57 +29,15 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        public bool CheckLanguagePackInstall(string languageCode)
+        public bool CheckLanguagePackInstall(string languageCode) => GetLanguageStatus(languageCode).IsReady;
+
+        internal OcrLanguageStatus GetLanguageStatus(string languageCode)
         {
-            _currentLanguageCode = null;
-
-            if (!LanguageMap.TryGetValue(languageCode, out string? languageTag))
-            {
-                return false;
-            }
-
-            _currentLanguageCode = languageTag;
-
-            if (!TryGetAvailableRecognizerLanguages(out IReadOnlyList<Language> availableLanguages))
-            {
-                return false;
-            }
-
-            foreach (var language in availableLanguages)
-            {
-                Console.WriteLine($"------------------------------------------{language.LanguageTag}");
-                if (language.LanguageTag == languageTag || language.LanguageTag == languageCode)
-                {
-                    Console.WriteLine($"Language pack is installed for {languageCode}");
-                    return true;
-                }
-            }
-
-            Console.WriteLine($"Language pack is not installed for {languageCode}");
-            return false;
+            bool queried = TryGetAvailableRecognizerLanguages(out var languages);
+            var status = OcrLanguageSetup.Evaluate(languageCode, languages.Select(l => l.LanguageTag), queried);
+            _currentLanguageCode = status.RecognizerTag ?? status.CapabilityTag;
+            return status;
         }
-
-        // Map of language codes to Windows language tags
-        private readonly Dictionary<string, string> LanguageMap = new Dictionary<string, string>
-        {
-            { "en", "en-US" },
-            { "ch_sim", "zh-Hans-CN" },
-            { "es", "es-ES" },
-            { "fr", "fr-FR" },
-            { "it", "it-IT" },
-            { "de", "de-DE" },
-            { "hu", "hu-HU" },
-            { "ru", "ru-RU" },
-            { "ar", "ar-SA" },
-            { "pt", "pt-BR" },
-            { "nl", "nl-NL" },
-            { "ja", "ja-JP" },
-            { "ko", "ko-KR" },
-            { "ckb", "ku-Arab" },
-            { "bn", "bn-BD" },
-            { "el", "el-GR" },
-            { "he", "he-IL" }
-        };
 
         // Convert a System.Drawing.Bitmap to a Windows.Graphics.Imaging.SoftwareBitmap
         public async Task<SoftwareBitmap> ConvertBitmapToSoftwareBitmapAsync(System.Drawing.Bitmap bitmap)
@@ -343,6 +301,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 availableLanguages = OcrEngine.AvailableRecognizerLanguages.ToList();
+                _windowsOcrUnavailable = false;
                 return true;
             }
             catch (Exception ex)
@@ -355,54 +314,17 @@ namespace AlpWareStudio.Localay
 
         private OcrEngine? TryCreateOcrEngine(string languageCode)
         {
-            if (LanguageMap.TryGetValue(languageCode, out string? languageTag))
-            {
-                _currentLanguageCode = languageTag;
-
-                try
-                {
-                    var language = new Language(languageTag);
-
-                    if (OcrEngine.IsLanguageSupported(language))
-                    {
-                        var engine = OcrEngine.TryCreateFromLanguage(language);
-                        if (engine != null)
-                        {
-                            return engine;
-                        }
-
-                        Console.WriteLine($"Windows OCR could not create an engine for language {languageTag}, falling back to user profile languages.");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"Language {languageTag} not supported for Windows OCR, using user profile languages.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    HandleWindowsOcrActivationFailure($"creating an OCR engine for language {languageTag}", ex);
-                    return null;
-                }
-            }
-            else
-            {
-                _currentLanguageCode = null;
-                Console.WriteLine($"No mapping found for language {languageCode}, using user profile languages.");
-            }
-
+            var status = GetLanguageStatus(languageCode);
+            if (!status.IsReady || status.RecognizerTag == null) return null;
             try
             {
-                var fallbackEngine = OcrEngine.TryCreateFromUserProfileLanguages();
-                if (fallbackEngine == null)
-                {
-                    Console.WriteLine("Windows OCR could not create an engine from user profile languages.");
-                }
-
-                return fallbackEngine;
+                var engine = OcrEngine.TryCreateFromLanguage(new Language(status.RecognizerTag));
+                if (engine != null) _windowsOcrUnavailable = false;
+                return engine;
             }
             catch (Exception ex)
             {
-                HandleWindowsOcrActivationFailure("creating an OCR engine from user profile languages", ex);
+                HandleWindowsOcrActivationFailure($"creating an OCR engine for language {status.RecognizerTag}", ex);
                 return null;
             }
         }

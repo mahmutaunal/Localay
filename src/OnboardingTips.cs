@@ -11,8 +11,8 @@ namespace AlpWareStudio.Localay
 
         // With auto OCR, frames come in continuously, so wait for several empty frames before suggesting a fix
         private const int EmptyFramesBeforeNoTextTip = 10;
-        // A single failure is often a transient network error
-        private const int FailuresBeforeTranslationTip = 2;
+        // Show one classified failure per streak; background retries do not produce more tips.
+        private const int FailuresBeforeTranslationTip = 1;
 
         private const int TipDurationMs = 12000;
 
@@ -30,6 +30,8 @@ namespace AlpWareStudio.Localay
         {
             lock (_lock)
             {
+                _consecutiveTranslationFailures = 0;
+                _translationFailureTipShown = false;
                 _emptyFramesThisSession = 0;
                 _textSeenThisSession = false;
                 _noTextTipShownThisSession = false;
@@ -73,7 +75,7 @@ namespace AlpWareStudio.Localay
         /// <summary>
         /// Call after each OCR translation attempt.
         /// </summary>
-        public static void OnTranslationResult(string service, bool succeeded)
+        internal static void OnTranslationResult(string service, bool succeeded, TranslationFailure? failure = null, System.Threading.CancellationToken cancellation = default)
         {
             bool showFailureTip = false;
             lock (_lock)
@@ -96,7 +98,7 @@ namespace AlpWareStudio.Localay
 
             if (showFailureTip)
             {
-                Show("Tip_TranslationFailed_Title", Format("Tip_TranslationFailed_Message", UiText.Service(service), S("Btn_Settings")));
+                Show("Tip_TranslationFailed_Title", UiText.Service(service) + ": " + S((failure ?? new(TranslationFailureKind.InvalidResponse)).MessageKey), cancellation);
             }
 
             if (succeeded)
@@ -118,11 +120,14 @@ namespace AlpWareStudio.Localay
             Show(titleKey, message);
         }
 
-        private static void Show(string titleKey, string message)
+        private static void Show(string titleKey, string message, System.Threading.CancellationToken cancellation = default)
         {
             // Callers run on OCR/translation threads; the notification must be created on the UI thread
             System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
-                MainWindow.Instance.ShowFastNotification(S(titleKey), message, TipDurationMs));
+            {
+                if (!cancellation.IsCancellationRequested)
+                    MainWindow.Instance.ShowFastNotification(S(titleKey), message, TipDurationMs);
+            });
         }
 
         private static string S(string key) => LocalizationManager.Instance.Strings[key];

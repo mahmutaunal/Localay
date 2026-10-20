@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -16,7 +16,7 @@ namespace AlpWareStudio.Localay
     {
         private const string CombinedBlockSeparator = "##|||##";
         // Shared across instances (a new service is created per translation) so connections are reused
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(15) };
         private readonly string _singleKey;
 
         // Default private key 
@@ -248,6 +248,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error in MicrosoftLegacyTranslationService: {ex.Message}");
                 try
                 {
@@ -268,7 +269,6 @@ namespace AlpWareStudio.Localay
                 }
 
                 string[] originalParts = text.Split(new[] { CombinedBlockSeparator }, StringSplitOptions.None);
-                string[] translatedParts = new string[originalParts.Length];
                 var translatableParts = new List<string>();
                 var partMap = new List<int>(originalParts.Length);
 
@@ -291,29 +291,17 @@ namespace AlpWareStudio.Localay
                 }
 
                 List<string>? translatedBatch = await TranslateBatchAsync(translatableParts, urlForSignature, privateKey);
-                if (translatedBatch == null)
+                if (translatedBatch == null || translatedBatch.Count != translatableParts.Count)
                 {
                     return null;
                 }
 
-                for (int i = 0; i < originalParts.Length; i++)
-                {
-                    int translatedIndex = partMap[i];
-                    if (translatedIndex < 0 || translatedIndex >= translatedBatch.Count)
-                    {
-                        translatedParts[i] = originalParts[i];
-                        continue;
-                    }
-
-                    string translatedPart = translatedBatch[translatedIndex];
-                    translatedParts[i] = string.IsNullOrWhiteSpace(translatedPart) ? originalParts[i] : translatedPart;
-                }
-
-                Console.WriteLine($"Microsoft preserved separator across {translatedParts.Length} block(s)");
-                return string.Join(CombinedBlockSeparator, translatedParts);
+                var rebuilt = TranslationParts.Reassemble(partMap, translatedBatch);
+                return rebuilt.Success ? rebuilt.Text : null;
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error preserving Microsoft separators: {ex.Message}");
                 return null;
             }
@@ -357,6 +345,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception exSend)
             {
+                TranslationRequestContext.ReportException(exSend);
                 string debug = $"Exception sending request after retries: {exSend}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}";
                 try { LogManager.Instance.WriteDiagnostic("microsoft_last_request.txt", debug); } catch { }
                 Console.WriteLine($"Microsoft translator request failed: {exSend.Message}");
@@ -365,7 +354,7 @@ namespace AlpWareStudio.Localay
 
             if (!response.IsSuccessStatusCode)
             {
-                string err = await response.Content.ReadAsStringAsync();
+                string err = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                 string debug = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}\nURL: https://{urlForSignature}\nRequestBody: {jsonRequest}\nResponse: {err}";
 
                 try { LogManager.Instance.WriteDiagnostic("microsoft_last_error.txt", err); } catch { }
@@ -375,7 +364,7 @@ namespace AlpWareStudio.Localay
                 return null;
             }
 
-            string jsonResponse = await response.Content.ReadAsStringAsync();
+            string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
             try
             {
                 using JsonDocument respDoc = JsonDocument.Parse(jsonResponse);
@@ -397,6 +386,7 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Error parsing Microsoft response: {ex.Message}");
                 try { LogManager.Instance.WriteDiagnostic("microsoft_last_error.txt", jsonResponse); } catch { }
                 return null;
@@ -423,7 +413,7 @@ namespace AlpWareStudio.Localay
                 return null;
             }
 
-            await _concurrencySemaphore.WaitAsync();
+            await _concurrencySemaphore.WaitAsync(TranslationRequestContext.Cancellation);
             try
             {
                 for (int attempt = 1; attempt <= maxRetries; attempt++)
@@ -440,10 +430,11 @@ namespace AlpWareStudio.Localay
                     HttpResponseMessage response = null!;
                     try
                     {
-                        response = await _httpClient.SendAsync(request);
+                        response = await _httpClient.SendAsync(request, TranslationRequestContext.Cancellation);
                     }
                     catch (Exception ex)
                     {
+                        TranslationRequestContext.ReportException(ex);
                         // Network error - consider retrying
                         Console.WriteLine($"Send attempt {attempt} failed: {ex.Message}");
                         if (attempt == maxRetries)
@@ -453,7 +444,7 @@ namespace AlpWareStudio.Localay
                         else
                         {
                             int delayMs = CalculateBackoffMs(attempt);
-                            await Task.Delay(delayMs);
+                            await Task.Delay(delayMs, TranslationRequestContext.Cancellation);
                             continue;
                         }
                     }
@@ -495,7 +486,7 @@ namespace AlpWareStudio.Localay
 
                         // Log and wait
                         Console.WriteLine($"Received 429, attempt {attempt}, waiting {delayMs}ms before retry");
-                        await Task.Delay(delayMs);
+                        await Task.Delay(delayMs, TranslationRequestContext.Cancellation);
                         continue;
                     }
                     else if (status >= 500 && status < 600)
@@ -507,7 +498,7 @@ namespace AlpWareStudio.Localay
                         }
                         int delayMs = CalculateBackoffMs(attempt);
                         Console.WriteLine($"Server error {status}, attempt {attempt}, waiting {delayMs}ms before retry");
-                        await Task.Delay(delayMs);
+                        await Task.Delay(delayMs, TranslationRequestContext.Cancellation);
                         continue;
                     }
                     else

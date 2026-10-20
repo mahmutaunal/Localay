@@ -174,7 +174,7 @@ namespace AlpWareStudio.Localay
                     Console.WriteLine($"After manga processing: {paragraphs.Count} paragraphs");
                 }
                 // Create JSON output
-                return CreateJsonOutput(paragraphs, nonCharacters);
+                return CreateJsonOutput(paragraphs, nonCharacters, isVertical);
             }
             catch (Exception ex)
             {
@@ -1200,10 +1200,20 @@ namespace AlpWareStudio.Localay
 
         #region Json Output Creation
 
-        /// <summary>
-        /// Create JSON output from processed paragraphs
-        /// </summary>
-        private JsonElement CreateJsonOutput(List<TextElement> paragraphs, List<TextElement> nonCharacters)
+        // Collect actual line/column extents even inside a merged paragraph.
+        private static IEnumerable<double> GetLineExtents(TextElement element, bool vertical)
+        {
+            if (element.ElementType == ElementType.Line)
+            {
+                yield return vertical ? element.Bounds.Width : element.Bounds.Height;
+                yield break;
+            }
+            foreach (var child in element.Children)
+                foreach (double extent in GetLineExtents(child, vertical)) yield return extent;
+        }
+
+        /// <summary>Create JSON output from processed paragraphs.</summary>
+        private JsonElement CreateJsonOutput(List<TextElement> paragraphs, List<TextElement> nonCharacters, bool isVertical)
         {
             // Get minimum text fragment size from config
             int minTextFragmentSize = ConfigManager.Instance.GetMinTextFragmentSize();
@@ -1260,6 +1270,10 @@ namespace AlpWareStudio.Localay
 
                         // Add metadata
                         writer.WriteNumber("line_count", paragraph.Children.Count);
+                        // Use actual lines, not the full paragraph height or translated glyph widths.
+                        double sourceLineHeight = OverlayFontPolicy.Median(GetLineExtents(paragraph, isVertical));
+                        if (sourceLineHeight > 0) writer.WriteNumber("source_line_height", sourceLineHeight);
+                        writer.WriteBoolean("is_vertical", isVertical);
                         writer.WriteString("element_type", "paragraph");
 
                         // Lets later merging keep text from different speech bubbles apart

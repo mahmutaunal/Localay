@@ -17,14 +17,20 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public static void ShowOnce(string service, string message, string title)
         {
-            lock (_lock)
-            {
-                if (!_notifiedServices.Add(service)) return;
-            }
+            // The pipeline reports the final outcome after retries/fallbacks. Intermediate
+            // provider failures must not open a dialog when another provider succeeds.
+            if (TranslationRequestContext.IsManaged) return;
+            var cancellation = TranslationRequestContext.Cancellation;
+            if (cancellation.IsCancellationRequested) return;
 
             // Application.Current is null during shutdown
             System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
             {
+                if (cancellation.IsCancellationRequested) return;
+                lock (_lock)
+                {
+                    if (!_notifiedServices.Add(service)) return;
+                }
                 System.Windows.MessageBox.Show(message, title,
                     System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
             });
@@ -35,6 +41,7 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public static void Reset(string service)
         {
+            if (TranslationRequestContext.Cancellation.IsCancellationRequested) return;
             lock (_lock)
             {
                 _notifiedServices.Remove(service);

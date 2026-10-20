@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -9,7 +9,7 @@ namespace AlpWareStudio.Localay
 {
     public class CustomApiTranslationService : ITranslationService
     {
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(60) };
         private static int _consecutiveFailures = 0;
         private static int _retryCount = 0;
         private static readonly object _keySwitchLock = new object();
@@ -77,6 +77,7 @@ namespace AlpWareStudio.Localay
             {
                 if (string.IsNullOrEmpty(apiKey))
                 {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
                     Console.WriteLine("Custom API key not configured");
                     return null;
                 }
@@ -108,11 +109,11 @@ namespace AlpWareStudio.Localay
                 _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
 
                 string url = ConfigManager.Instance.GetCustomApiUrl().Trim();
-                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+                HttpResponseMessage response = await _httpClient.PostAsync(url, content, TranslationRequestContext.Cancellation);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     // Reset consecutive failures counter on success
                     _consecutiveFailures = 0;
                     TranslationErrorNotifier.Reset("Custom API");
@@ -125,7 +126,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    string errorMessage = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     _consecutiveFailures++;
                     LogManager.Instance.WriteContentLine($"Custom API error: {response.StatusCode}, {errorMessage}, error count: {_consecutiveFailures}");
 
@@ -177,7 +178,7 @@ namespace AlpWareStudio.Localay
                                     string.Format(LocalizationManager.Instance.Strings["Msg_CustomApiError"], detailedError),
                                     LocalizationManager.Instance.Strings["Title_CustomApiError"]);
                             }
-                            await Task.Delay(delayMS);
+                            await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                             return null;
                         }
                     }
@@ -195,12 +196,13 @@ namespace AlpWareStudio.Localay
                             string.Format(LocalizationManager.Instance.Strings["Msg_CustomApiErrorStatus"], response.StatusCode, errorMessage),
                             LocalizationManager.Instance.Strings["Title_CustomApiError"]);
                     }
-                    await Task.Delay(delayMS);
+                    await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                     return null;
                 }
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Translation API error: {ex.Message}");
 
                 // Write error to file

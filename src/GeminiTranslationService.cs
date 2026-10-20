@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
@@ -10,7 +10,7 @@ namespace AlpWareStudio.Localay
 {
     public class GeminiTranslationService : ITranslationService
     {
-        private static readonly HttpClient _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(60) };
+        private static readonly HttpClient _httpClient = new HttpClient(new TranslationHttpHandler()) { Timeout = TimeSpan.FromSeconds(60) };
 
         /// <summary>Open the HTTPS connection before the first translation (see TranslationWarmUp).</summary>
         internal static Task WarmUpConnectionAsync() =>
@@ -114,6 +114,7 @@ namespace AlpWareStudio.Localay
             {
                 if (string.IsNullOrEmpty(apiKey))
                 {
+                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
                     Console.WriteLine("Gemini API key not configured");
                     return null;
                 }
@@ -162,11 +163,11 @@ namespace AlpWareStudio.Localay
                 string requestJson = JsonSerializer.Serialize(requestContent, jsonOptions);
                 var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
                 string url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
-                HttpResponseMessage response = await _httpClient.PostAsync(url, content);
+                HttpResponseMessage response = await _httpClient.PostAsync(url, content, TranslationRequestContext.Cancellation);
 
                 if (response.IsSuccessStatusCode)
                 {
-                    string jsonResponse = await response.Content.ReadAsStringAsync();
+                    string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
                     // Reset consecutive failures counter on success
                     _consecutiveFailures = 0;
                     TranslationErrorNotifier.Reset("Gemini");
@@ -180,7 +181,7 @@ namespace AlpWareStudio.Localay
                 }
                 else
                 {
-                    string errorMessage = await response.Content.ReadAsStringAsync();
+                    string errorMessage = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
 
                     // This model doesn't accept the thinking option we sent: try the next one
                     if (thinkingConfig != null &&
@@ -243,7 +244,7 @@ namespace AlpWareStudio.Localay
                                     string.Format(LocalizationManager.Instance.Strings["Msg_GeminiApiError"], detailedError),
                                     LocalizationManager.Instance.Strings["Title_GeminiError"]);
                             }
-                            await Task.Delay(delayMS);
+                            await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                             return null;
                         }
                     }
@@ -261,12 +262,13 @@ namespace AlpWareStudio.Localay
                             string.Format(LocalizationManager.Instance.Strings["Msg_GeminiApiErrorStatus"], response.StatusCode, errorMessage),
                             LocalizationManager.Instance.Strings["Title_GeminiError"]);
                     }
-                    await Task.Delay(delayMS);
+                    await Task.Delay(delayMS, TranslationRequestContext.Cancellation);
                     return null;
                 }
             }
             catch (Exception ex)
             {
+                TranslationRequestContext.ReportException(ex);
                 Console.WriteLine($"Translation API error: {ex.Message}");
 
                 // Write error to file
