@@ -11,27 +11,38 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 30
 
+    defaults:
+      run:
+        shell: pwsh
+
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Verify build assets and installer policy
+        run: |
+          ./tests/BuildAssetChecks.ps1
+          ./tests/InstallerPolicyChecks.ps1
+          ./tests/CompilerChecks.ps1
+
+      - name: Install verified Inno Setup compiler
+        run: ./installer/Install-Compiler.ps1
 
       - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           global-json-file: global.json
 
       - name: Restore locked dependencies
-        shell: pwsh
         run: |
           dotnet restore ./Localay.csproj -r win-x64 --locked-mode
           if ($LASTEXITCODE -ne 0) { throw 'Dependency restore failed.' }
 
       - name: Publish Windows application
-        shell: pwsh
         run: |
           dotnet publish ./Localay.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/publish
           if ($LASTEXITCODE -ne 0) { throw 'Windows application publish failed.' }
@@ -39,12 +50,7 @@ jobs:
             throw 'Published Localay.exe is missing.'
           }
 
-      - name: Install verified Inno Setup compiler
-        shell: pwsh
-        run: ./installer/Install-Compiler.ps1
-
       - name: Build Windows installer
-        shell: pwsh
         run: |
           ./Build-Installer.ps1 -PublishDirectory ./artifacts/publish
           $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe' -File)

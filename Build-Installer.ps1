@@ -12,9 +12,7 @@ if (-not $CompilerPath -or -not (Test-Path -LiteralPath $CompilerPath -PathType 
     throw "Set LOCALAY_ISCC to the verified Inno Setup compiler; CI runs installer/Install-Compiler.ps1."
 }
 $policy = Get-Content -LiteralPath (Join-Path $PSScriptRoot "installer/compiler.json") -Raw | ConvertFrom-Json
-if ((Get-Item -LiteralPath $CompilerPath).VersionInfo.FileVersion -notlike "$($policy.version)*") {
-    throw "Expected the pinned Inno Setup $($policy.version) compiler."
-}
+& (Join-Path $PSScriptRoot 'installer/Verify-Compiler.ps1') -CompilerPath $CompilerPath
 [xml]$project = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Localay.csproj")
 $version = @($project.Project.PropertyGroup.Version | Where-Object { $_ })[0]
 if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "Invalid release version: $version" }
