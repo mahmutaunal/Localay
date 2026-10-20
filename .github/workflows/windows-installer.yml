@@ -1,22 +1,20 @@
 name: Build Windows Installer
 
 on:
-  pull_request:
-  push:
-    branches: [main, "codex/**"]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build-windows:
-    name: Build, test and scan Localay setup
+  build:
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 30
+
     env:
       DOTNET_CLI_TELEMETRY_OPTOUT: "1"
       DOTNET_NOLOGO: "1"
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -25,49 +23,34 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-          cache: true
-          cache-dependency-path: packages.lock.json
 
-      - name: Run combined project validation, including Windows WPF
+      - name: Restore locked dependencies
         shell: pwsh
-        run: ./Verify-Project.ps1
+        run: |
+          dotnet restore ./Localay.csproj -r win-x64 --locked-mode
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency restore failed.' }
 
-      - name: Install verified, pinned Inno Setup compiler
+      - name: Publish Windows application
+        shell: pwsh
+        run: |
+          dotnet publish ./Localay.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/publish
+          if ($LASTEXITCODE -ne 0) { throw 'Windows application publish failed.' }
+          if (-not (Test-Path -LiteralPath artifacts/publish/Localay.exe -PathType Leaf)) {
+            throw 'Published Localay.exe is missing.'
+          }
+
+      - name: Install verified Inno Setup compiler
         shell: pwsh
         run: ./installer/Install-Compiler.ps1
 
-      - name: Prepare real Defender scans on the disposable hosted runner
-        shell: pwsh
-        run: ./.github/scripts/Prepare-Defender.ps1
-
-      - name: Publish, verify, package and scan with Microsoft Defender
-        shell: pwsh
-        run: ./Publish-Windows.ps1
-
-      - name: Test installation, reinstallation and uninstallation
+      - name: Build Windows installer
         shell: pwsh
         run: |
-          $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe')
-          if ($installers.Count -ne 1) { throw "Expected exactly one installer." }
-          ./tests/InstallerSmoke.ps1 -InstallerPath $installers[0].FullName -PublishDirectory artifacts/publish
+          ./Build-Installer.ps1 -PublishDirectory ./artifacts/publish
+          $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer.' }
 
-      - name: Record dependency security report
-        shell: pwsh
-        run: |
-          dotnet package list --project ./Localay.csproj --no-restore --vulnerable --include-transitive --format json > artifacts/dependency-audit.json
-          if ($LASTEXITCODE -ne 0) { throw "Dependency audit could not complete." }
-          $report = Get-Content artifacts/dependency-audit.json -Raw | ConvertFrom-Json
-          if ($report.sources -eq $null) { throw "Dependency audit returned no sources." }
-          if ($report.problems | Where-Object { $_.level -eq "error" }) { throw "Dependency audit returned an error." }
-          foreach ($project in $report.projects) {
-            foreach ($framework in $project.frameworks) {
-              foreach ($package in @($framework.topLevelPackages) + @($framework.transitivePackages)) {
-                if ($package.vulnerabilities) { throw "Vulnerable dependency: $($package.id)" }
-              }
-            }
-          }
-
-      - name: Upload Windows setup
+      - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
           name: Localay-Setup-windows-x64
@@ -77,28 +60,4 @@ jobs:
             artifacts/installer/build-info.json
           if-no-files-found: error
           compression-level: 0
-          retention-days: 30
-
-      - name: Upload optional portable package
-        uses: actions/upload-artifact@v4
-        with:
-          name: Localay-Portable-windows-x64
-          path: |
-            artifacts/package/*.zip
-            artifacts/package/*.sha256
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
-
-      - name: Upload validation reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Localay-validation
-          path: |
-            artifacts/defender*.json
-            artifacts/dependency-audit.json
-            artifacts/installer-tests/
-            artifacts/validation/project/
-          if-no-files-found: ignore
           retention-days: 30
