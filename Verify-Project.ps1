@@ -37,6 +37,7 @@ function Add-NotRun([string]$Name, [string]$Reason) {
 Push-Location $PSScriptRoot
 try {
     Invoke-Check 'repository-ignore-policy' { & ./tests/RepositoryPolicyChecks.ps1 }
+    Invoke-Check 'build-assets' { & ./tests/BuildAssetChecks.ps1 }
     Invoke-Check 'source-security-policy' { & ./Verify-SecurityPolicy.ps1 }
     Invoke-Check 'installer-policy' { & ./tests/InstallerPolicyChecks.ps1 }
     if (-not $SkipRestore) {
@@ -78,5 +79,13 @@ try {
     }
     $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $ReportDirectory 'summary.json') -Encoding utf8
 }
-if ($report.failed -gt 0) { throw "$($report.failed) validation step(s) failed. See $ReportDirectory/summary.json." }
+if ($env:GITHUB_STEP_SUMMARY) {
+    $table = @('## Localay validation', '', '| Check | Result |', '| --- | --- |')
+    $table += $steps | ForEach-Object { "| $($_.name) | $($_.status) |" }
+    $table | Out-File -LiteralPath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+}
+if ($report.failed -gt 0) {
+    $failedNames = ($steps | Where-Object status -eq 'failed' | ForEach-Object name) -join ', '
+    throw "$($report.failed) validation step(s) failed: $failedNames. See $ReportDirectory/summary.json."
+}
 Write-Host "Validation complete: $($report.passed) passed; $($report.notRun) not run. Report: $ReportDirectory/summary.json"

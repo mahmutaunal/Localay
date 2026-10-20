@@ -7,6 +7,7 @@ try {
     $publish = Join-Path $root "artifacts\publish"
     # Never mix output from older builds or locally saved settings into a new release.
     if (Test-Path -LiteralPath $publish) { Remove-Item -LiteralPath $publish -Recurse -Force }
+    & (Join-Path $root 'tests/BuildAssetChecks.ps1')
     & (Join-Path $root "Verify-SecurityPolicy.ps1")
     & (Join-Path $root "tests/InstallerPolicyChecks.ps1")
     dotnet restore .\Localay.csproj -r win-x64 --locked-mode

@@ -45,6 +45,8 @@ This check inspects the Windows assembly as data, so it also runs on macOS/Linux
 
 ## Combined validation
 
+Keep `assets/localay.ico` and `assets/icons/localay-256.png` in version control. The application and installer reference these files directly; the README logo does not replace them. `tests/BuildAssetChecks.ps1` verifies these inputs before compilation and packaging.
+
 Run `./Verify-Project.ps1` in PowerShell 7 for a locked/audited restore, Windows Release build, source/installer policies, security, preferences, localization and product/license checks. On Windows it also runs `tests/UiWindowsChecks`, an STA WPF host that exercises live language changes, production language templates, theme brushes, About and API-key dialogs. It does not start Localay's capture loop, create user settings, register hotkeys, or open links. On macOS/Linux that runtime check is explicitly recorded as `not_run`.
 
 `artifacts/validation/project/summary.json` records passed, failed and not-run steps, with one log per check. Independent checks continue after a failure; the command exits unsuccessfully if any step fails. `-SkipRestore` is for repeated checks with existing restored assets and is explicitly reported as skipping the fresh audit. GitHub Actions runs the full command and uploads its reports even on failure, then separately builds/scans the setup and tests its installation lifecycle.
