@@ -1,0 +1,338 @@
+[
+  {
+    "Name": "short-subtitle-under-100",
+    "Blocks": 2,
+    "Translated": 2,
+    "Visible": 2,
+    "Outcome": "UiApplied",
+    "FinishMs": 85,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      },
+      {
+        "Stage": "TranslationStarted",
+        "AtMs": 25
+      },
+      {
+        "Stage": "TranslationReady",
+        "AtMs": 78
+      },
+      {
+        "Stage": "UiApplied",
+        "AtMs": 80
+      }
+    ],
+    "Successes": 1,
+    "ExpectedUiMs": 80
+  },
+  {
+    "Name": "cache-layout-reuse",
+    "Blocks": 2,
+    "Translated": 2,
+    "Visible": 2,
+    "Outcome": "UiApplied",
+    "FinishMs": 45,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      },
+      {
+        "Stage": "TranslationStarted",
+        "AtMs": 25
+      },
+      {
+        "Stage": "TranslationReady",
+        "AtMs": 38
+      },
+      {
+        "Stage": "UiApplied",
+        "AtMs": 40
+      }
+    ],
+    "Successes": 1,
+    "ExpectedUiMs": 40
+  },
+  {
+    "Name": "settling-included",
+    "Blocks": 2,
+    "Translated": 2,
+    "Visible": 2,
+    "Outcome": "UiApplied",
+    "FinishMs": 405,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      },
+      {
+        "Stage": "TranslationStarted",
+        "AtMs": 25
+      },
+      {
+        "Stage": "TranslationReady",
+        "AtMs": 398
+      },
+      {
+        "Stage": "UiApplied",
+        "AtMs": 400
+      }
+    ],
+    "Successes": 1,
+    "ExpectedUiMs": 400
+  },
+  {
+    "Name": "slow-provider-above-500",
+    "Blocks": 3,
+    "Translated": 3,
+    "Visible": 3,
+    "Outcome": "UiApplied",
+    "FinishMs": 1205,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      },
+      {
+        "Stage": "TranslationStarted",
+        "AtMs": 25
+      },
+      {
+        "Stage": "TranslationReady",
+        "AtMs": 1198
+      },
+      {
+        "Stage": "UiApplied",
+        "AtMs": 1200
+      }
+    ],
+    "Successes": 1,
+    "ExpectedUiMs": 1200
+  },
+  {
+    "Name": "missing-provider-block",
+    "Blocks": 3,
+    "Translated": 2,
+    "Visible": 2,
+    "Outcome": "Partial",
+    "FinishMs": 200,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "network-failure",
+    "Blocks": 3,
+    "Translated": 0,
+    "Visible": 0,
+    "Outcome": "Failed",
+    "FinishMs": 1000,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "stop-during-request",
+    "Blocks": 2,
+    "Translated": 0,
+    "Visible": 0,
+    "Outcome": "Canceled",
+    "FinishMs": 50,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "scroll-supersedes-scene",
+    "Blocks": 2,
+    "Translated": 0,
+    "Visible": 0,
+    "Outcome": "Superseded",
+    "FinishMs": 30,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "no-output-window",
+    "Blocks": 2,
+    "Translated": 2,
+    "Visible": 0,
+    "Outcome": "NotPresented",
+    "FinishMs": 80,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "empty-source",
+    "Blocks": 0,
+    "Translated": 0,
+    "Visible": 0,
+    "Outcome": "Empty",
+    "FinishMs": 25,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "ocr-only",
+    "Blocks": 2,
+    "Translated": 0,
+    "Visible": 0,
+    "Outcome": "RecognitionOnly",
+    "FinishMs": 25,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  },
+  {
+    "Name": "false-success-without-ui",
+    "Blocks": 2,
+    "Translated": 2,
+    "Visible": 2,
+    "Outcome": "UiApplied",
+    "FinishMs": 80,
+    "Events": [
+      {
+        "Stage": "CaptureReady",
+        "AtMs": 5
+      },
+      {
+        "Stage": "OcrStarted",
+        "AtMs": 6
+      },
+      {
+        "Stage": "OcrCompleted",
+        "AtMs": 20
+      }
+    ],
+    "Successes": 0,
+    "ExpectedUiMs": null
+  }
+]

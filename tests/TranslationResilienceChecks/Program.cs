@@ -102,6 +102,9 @@ await TranslationRequestContext.RunAsync(new WorkService(_ => Task.FromResult<st
 release.SetResult(); await first;
 Check(firstFailure?.Kind == TranslationFailureKind.Unauthorized && secondFailure?.Kind == TranslationFailureKind.InvalidResponse, "parallel provider diagnostics remain isolated");
 Check(!TranslationRequestContext.IsManaged, "request diagnostics never leak into the caller");
+
+await TranslationPipelineChecks.RunAsync(Check);
+await LocalModelChecks.RunAsync(Check);
 Console.WriteLine($"{passed} translation resilience checks passed.");
 
 sealed class ReplyHandler(Func<HttpResponseMessage> reply) : HttpMessageHandler

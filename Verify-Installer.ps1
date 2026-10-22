@@ -7,12 +7,15 @@ $pe = [BitConverter]::ToInt32($bytes, 0x3c)
 if ($pe -lt 0 -or $pe + 24 -ge $bytes.Length -or [BitConverter]::ToUInt32($bytes, $pe) -ne 0x4550) {
     throw "Installer PE header is invalid."
 }
-# Inno's setup loader embeds its UAC manifest as UTF-8 or UTF-16 XML.
+# Inno's loader always starts asInvoker and performs elevation itself based on
+# PrivilegesRequired. This checks PE/loader compatibility, NOT installation scope.
+# Verify-InstallerPolicy.ps1 and Windows install tests check that separate policy.
+# See https://jrsoftware.org/is6help/topic_securitymeasures.htm
 $text = [Text.Encoding]::UTF8.GetString($bytes) + [Text.Encoding]::Unicode.GetString($bytes)
 if ($text -notmatch '<requestedExecutionLevel\b[^>]*\blevel\s*=\s*["'']asInvoker["'']') {
-    throw "Installer must have a standard-user asInvoker manifest."
+    throw "Expected the standard Inno asInvoker loader manifest."
 }
 if ($text -match '<requestedExecutionLevel\b[^>]*\blevel\s*=\s*["''](?:requireAdministrator|highestAvailable)["'']') {
-    throw "Installer must not request elevation."
+    throw "Unexpected loader manifest: Inno handles elevation after its loader starts."
 }
-Write-Host "Verified Windows installer and non-elevating manifest."
+Write-Host "Verified Windows executable and Inno loader manifest; elevation policy is checked separately."

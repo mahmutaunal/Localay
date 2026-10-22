@@ -374,8 +374,12 @@ namespace AlpWareStudio.Localay
         }
 
         // Constructor
-        internal ConfigManager(string? dataDirectory = null, string? legacyDirectory = null)
+        private readonly Action<Exception> _saveErrorReporter;
+
+        internal ConfigManager(string? dataDirectory = null, string? legacyDirectory = null,
+            Action<Exception>? saveErrorReporter = null)
         {
+            _saveErrorReporter = saveErrorReporter ?? ReportConfigSaveError;
             _configValues = new Dictionary<string, string>();
 
             string appDirectory = dataDirectory ?? AppPaths.DataDirectory;
@@ -720,6 +724,7 @@ namespace AlpWareStudio.Localay
         // interface language, and one-time state (welcome screen and tips already seen, migrations done)
         private static bool IsKeptOnReset(string key) =>
             ConfigFileSecurity.IsSecret(key) ||
+            (key.StartsWith("service_", StringComparison.Ordinal) && key.EndsWith("_prompt_template", StringComparison.Ordinal)) ||
             key == CUSTOM_API_URL || key == CUSTOM_API_MODEL ||
             key == LANGUAGE_INTERFACE ||
             key == SHOW_QUICK_START || key == ONBOARDING_TIPS_SHOWN || key == FORCE_UPDATE_PROMPT ||
@@ -854,55 +859,70 @@ namespace AlpWareStudio.Localay
                 Console.WriteLine("Settings were reset; not saving config until the app restarts");
                 return;
             }
-
             try
             {
-                bool includeSecrets = filePath == "Default";
-                var entries = _configValues.Where(e => includeSecrets || !ConfigFileSecurity.IsProfilePrivate(e.Key)).ToArray();
-                StringBuilder sb = new StringBuilder();
-                sb.AppendLine("# Localay settings; credentials are protected for the current Windows user.");
-                sb.AppendLine("# Format for single-line values: key|value|");
-                sb.AppendLine("# Format for multiline values: <key_start>multiple lines of content<key_end>");
-                sb.AppendLine();
-
-                // First add single-line entries
-                foreach (var entry in entries.Where(e => !ShouldBeMultiline(e.Key)))
-                {
-                    string value = entry.Value;
-                    if (ConfigFileSecurity.IsSecret(entry.Key))
-                    {
-                        CredentialRedactor.Register(value);
-                        value = string.IsNullOrEmpty(value) && _unreadableSecrets.TryGetValue(entry.Key, out var unreadable)
-                            ? unreadable : ConfigFileSecurity.Protect(value);
-                    }
-                    sb.AppendLine($"{entry.Key}|{value}|");
-                }
-
-                // Then add multiline entries
-                foreach (var entry in entries.Where(e => ShouldBeMultiline(e.Key)))
-                {
-                    sb.AppendLine();
-                    sb.AppendLine($"<{entry.Key}_start>");
-                    sb.AppendLine(entry.Value);
-                    sb.AppendLine($"<{entry.Key}_end>");
-                }
-
-                // Write to file
-                if (filePath == "Default")
-                    AppPaths.WriteAtomic(_configFilePath, sb.ToString());
-                else
-                {
-                    AppPaths.WriteAtomic(filePath, sb.ToString());
-                }
-
+                WriteConfig(filePath, _configValues);
                 Console.WriteLine($"Saved config to {_configFilePath}");
             }
-            catch (Exception ex)
+            catch (Exception ex) { _saveErrorReporter(ex); }
+        }
+
+        private void WriteConfig(string filePath, IEnumerable<KeyValuePair<string, string>> values)
+        {
+            if (_configWritesFrozen && filePath == "Default")
+                throw new InvalidOperationException("Settings have been reset. Restart before changing preferences.");
+            bool includeSecrets = filePath == "Default";
+            var entries = values.Where(e => includeSecrets || !ConfigFileSecurity.IsProfilePrivate(e.Key)).ToArray();
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("# Localay settings; credentials are protected for the current Windows user.");
+            sb.AppendLine("# Format for single-line values: key|value|");
+            sb.AppendLine("# Format for multiline values: <key_start>multiple lines of content<key_end>");
+            sb.AppendLine();
+
+            // First add single-line entries
+            foreach (var entry in entries.Where(e => !ShouldBeMultiline(e.Key)))
             {
-                Console.WriteLine($"Error saving config: {ex.Message}");
-                MessageBox.Show(UiText.Format("Msg_ConfigSaveError", ex.Message), UiText.Get("Title_ConfigError"),
-                    MessageBoxButton.OK, MessageBoxImage.Error);
+                string value = entry.Value;
+                if (ConfigFileSecurity.IsSecret(entry.Key))
+                {
+                    CredentialRedactor.Register(value);
+                    value = string.IsNullOrEmpty(value) && _unreadableSecrets.TryGetValue(entry.Key, out var unreadable)
+                        ? unreadable : ConfigFileSecurity.Protect(value);
+                }
+                sb.AppendLine($"{entry.Key}|{value}|");
             }
+
+            // Then add multiline entries
+            foreach (var entry in entries.Where(e => ShouldBeMultiline(e.Key)))
+            {
+                sb.AppendLine();
+                sb.AppendLine($"<{entry.Key}_start>");
+                sb.AppendLine(entry.Value);
+                sb.AppendLine($"<{entry.Key}_end>");
+            }
+
+            // Write to file
+            if (filePath == "Default")
+                AppPaths.WriteAtomic(_configFilePath, sb.ToString());
+            else
+            {
+                AppPaths.WriteAtomic(filePath, sb.ToString());
+            }
+        }
+
+        private static void ReportConfigSaveError(Exception ex)
+        {
+            Console.WriteLine($"Error saving config: {ex.Message}");
+            MessageBox.Show(UiText.Format("Msg_ConfigSaveError", ex.Message), UiText.Get("Title_ConfigError"),
+                MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+
+        private bool SetPreference(string key, string value, string? obsoleteKey = null)
+        {
+            if (PreferenceCommit.TrySet(_configValues, key, value,
+                candidate => WriteConfig("Default", candidate), out var error, obsoleteKey)) return true;
+            _saveErrorReporter(error!);
+            return false;
         }
 
         // Determine if a key should be stored as multiline
@@ -1481,13 +1501,219 @@ namespace AlpWareStudio.Localay
         // Set current translation service
         public void SetTranslationService(string service)
         {
-            if (service == "Gemini" || service == "Ollama" || service == "ChatGPT" || service == "Google Translate" || service == "Yandex" || service == "Mistral" || service == "LM Studio" || service == "Microsoft" || service == "Groq" || service == "Custom API")
+            if (ServicePreferenceDraft.Services.Contains(service))
             {
                 _currentTranslationService = service;
                 _configValues[TRANSLATION_SERVICE] = service;
                 SaveConfig();
                 Console.WriteLine($"Translation service set to {service}");
             }
+        }
+
+        internal IReadOnlyDictionary<string, string> ReadServicePreferences()
+        {
+            var values = ServicePreferenceDraft.Defaults.ToDictionary(p => p.Key, p => GetValue(p.Key, p.Value));
+            values[TRANSLATION_SERVICE] = GetCurrentTranslationService();
+            values[GOOGLE_TRANSLATE_USE_CLOUD_API] = GetGoogleTranslateUseCloudApi() ? "true" : "false";
+            values[GOOGLE_TRANSLATE_AUTO_MAP_LANGUAGES] = GetGoogleTranslateAutoMapLanguages() ? "true" : "false";
+            values[MICROSOFT_LEGACY_SIGNATURE_MODE] = GetMicrosoftLegacySignatureMode() ? "true" : "false";
+            foreach (var provider in ServicePreferenceDraft.KeyPrefixes)
+            {
+                values[provider.Value + "_api_keys"] = GetValue(provider.Value + "_api_keys");
+                values[provider.Value + "_api_key"] = GetValue(provider.Value + "_api_key");
+            }
+            foreach (string service in ServicePreferenceDraft.Services.Where(ServicePreferenceDraft.UsesPrompt))
+                values[ServicePreferenceDraft.PromptKey(service)] = GetServicePrompt(service);
+            return values;
+        }
+
+        internal bool TrySaveServicePreferences(IReadOnlyDictionary<string, string> expected,
+            IReadOnlyDictionary<string, string> edited, out bool conflict)
+        {
+            var current = ReadServicePreferences();
+            conflict = !ServicePreferenceDraft.Same(expected, current);
+            if (conflict || edited.Count != current.Count || edited.Keys.Any(k => !current.ContainsKey(k)) ||
+                ServicePreferenceDraft.Validate(edited, expected) != null) return false;
+            var changes = edited.Where(p => current[p.Key] != p.Value).ToDictionary(p => p.Key, p => p.Value);
+            if (!PreferenceCommit.TryUpdate(_configValues, changes,
+                candidate => WriteConfig("Default", candidate), out var error))
+            {
+                _saveErrorReporter(error!);
+                return false;
+            }
+            // The service cache must never publish a choice that failed persistence.
+            _currentTranslationService = edited[TRANSLATION_SERVICE];
+            return true;
+        }
+
+        // Profiles carry game processing and result preferences. Personal/interface/service
+        // settings and screen geometry stay local and cannot be imported from old profiles.
+        private static HashSet<string> ProfilePreferenceKeys() => SectionPreferenceDraft.AdvancedDefaults.Keys
+            .Concat(ResultPreferenceDraft.Defaults.Keys).Concat(new[] { OCR_METHOD, AUTO_OCR, AUTO_TRANSLATE_ENABLED, MULTI_SELECTION_AREA, MANGA_MODE })
+            .ToHashSet(StringComparer.Ordinal);
+
+        internal bool TryWriteGameProfile(string name, bool overwrite)
+        {
+            try
+            {
+                if (!ProfileDocument.ValidName(name)) return false;
+                string path = Path.Combine(_profileFolderPath, name + ".txt");
+                if (File.Exists(path) != overwrite) return false;
+                var values = ReadAdvancedPreferences().Concat(ReadResultPreferences()).ToDictionary(p => p.Key, p => p.Value);
+                var capture = ReadCapturePreferences();
+                values[OCR_METHOD] = capture.OcrMethod;
+                values[AUTO_OCR] = capture.AutoOcr ? "true" : "false";
+                values[AUTO_TRANSLATE_ENABLED] = capture.AutoTranslate ? "true" : "false";
+                values[MULTI_SELECTION_AREA] = capture.MultipleAreas ? "true" : "false";
+                values[MANGA_MODE] = capture.MangaMode ? "true" : "false";
+                if (SectionPreferenceDraft.InvalidAdvancedField(ReadAdvancedPreferences()) != null || ResultPreferenceDraft.Validate(ReadResultPreferences()) != null) return false;
+                Directory.CreateDirectory(_profileFolderPath);
+                WriteConfig(path, values);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            { _saveErrorReporter(ex); return false; }
+        }
+
+        internal bool TryLoadGameProfile(string name)
+        {
+            try
+            {
+                if (!ProfileDocument.ValidName(name)) return false;
+                var edits = ProfileDocument.Read(File.ReadAllText(Path.Combine(_profileFolderPath, name + ".txt")), ProfilePreferenceKeys());
+                if (edits.Count == 0) return false;
+                var advanced = new Dictionary<string, string>(ReadAdvancedPreferences());
+                var result = new Dictionary<string, string>(ReadResultPreferences());
+                foreach (var pair in edits)
+                {
+                    if (advanced.ContainsKey(pair.Key)) advanced[pair.Key] = pair.Value;
+                    if (result.ContainsKey(pair.Key)) result[pair.Key] = pair.Value;
+                }
+                if (SectionPreferenceDraft.InvalidAdvancedField(advanced) != null || ResultPreferenceDraft.Validate(result) != null) return false;
+                foreach (var phrase in ParseIgnorePhrases(advanced[IGNORE_PHRASES]).Where(p => p.Item2 == IgnorePhraseMatchType.RegularExpression))
+                    try { _ = new Regex(phrase.Item1); } catch (ArgumentException) { return false; }
+                var capture = ReadCapturePreferences();
+                string Get(string key, string fallback) => edits.TryGetValue(key, out var value) ? value : fallback;
+                foreach (string key in new[] { AUTO_OCR, AUTO_TRANSLATE_ENABLED, MULTI_SELECTION_AREA, MANGA_MODE })
+                    if (edits.TryGetValue(key, out var value) && !bool.TryParse(value, out _)) return false;
+                var nextCapture = new CapturePreferenceValues(Get(OCR_METHOD, capture.OcrMethod), capture.ScreenIndex,
+                    bool.Parse(Get(AUTO_OCR, capture.AutoOcr.ToString())), bool.Parse(Get(AUTO_TRANSLATE_ENABLED, capture.AutoTranslate.ToString())),
+                    bool.Parse(Get(MULTI_SELECTION_AREA, capture.MultipleAreas.ToString())), bool.Parse(Get(MANGA_MODE, capture.MangaMode.ToString())));
+                if (nextCapture.Validate(System.Windows.Forms.Screen.AllScreens.Select((_, index) => index).ToArray(), NativeOcrAssets.IsAvailable) != null) return false;
+                if (!PreferenceCommit.TryUpdate(_configValues, edits, candidate => WriteConfig("Default", candidate), out var error))
+                { _saveErrorReporter(error!); return false; }
+                _ignorePhraseSet = null;
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            { _saveErrorReporter(ex); return false; }
+        }
+
+        internal bool TryRemoveGameProfile(string name)
+        {
+            try
+            {
+                if (!ProfileDocument.ValidName(name)) return false;
+                string path = Path.Combine(_profileFolderPath, name + ".txt");
+                if (!File.Exists(path)) return false;
+                File.Delete(path);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            { _saveErrorReporter(ex); return false; }
+        }
+
+        internal IReadOnlyDictionary<string, string> ReadAdvancedPreferences() =>
+            SectionPreferenceDraft.AdvancedDefaults.ToDictionary(p => p.Key,
+                p => p.Value is "true" or "false" ? (GetBoolValue(p.Key, p.Value == "true") ? "true" : "false") : GetValue(p.Key, p.Value));
+
+        internal IReadOnlyDictionary<string, string> ReadShortcutPreferences() =>
+            _hotKeyEntries.Values.Where(e => e.ConfigKey != HOTKEY_AUDIO_SERVICE).DistinctBy(e => e.ConfigKey).ToDictionary(e => e.ConfigKey, e => GetValue(e.ConfigKey, e.Default))
+                .Append(new KeyValuePair<string, string>(HOT_KEY_ENABLE, IsHotKeyEnabled() ? "true" : "false")).ToDictionary(p => p.Key, p => p.Value);
+
+        internal string HotkeyPreferenceKey(string function) => _hotKeyEntries[function].ConfigKey;
+
+        internal bool TrySaveSectionPreferences(bool advanced, IReadOnlyDictionary<string, string> expected,
+            IReadOnlyDictionary<string, string> edited, out bool conflict)
+        {
+            var current = advanced ? ReadAdvancedPreferences() : ReadShortcutPreferences();
+            conflict = !SectionPreferenceDraft.Same(expected, current);
+            if (conflict || edited.Count != current.Count || current.Keys.Any(k => !edited.ContainsKey(k))) return false;
+            if (advanced)
+            {
+                if (SectionPreferenceDraft.InvalidAdvancedField(edited) != null) return false;
+                var phrases = ParseIgnorePhrases(edited[IGNORE_PHRASES]);
+                if (phrases.Any(p => string.IsNullOrWhiteSpace(p.Item1) || !Enum.IsDefined(p.Item2))) return false;
+                foreach (var phrase in phrases.Where(p => p.Item2 == IgnorePhraseMatchType.RegularExpression))
+                    try { _ = new Regex(phrase.Item1); } catch (ArgumentException) { return false; }
+            }
+            else
+            {
+                if (edited[HOT_KEY_ENABLE] is not ("true" or "false")) return false;
+                var combinations = new HashSet<(uint, int)>();
+                foreach (var pair in edited.Where(p => p.Key != HOT_KEY_ENABLE && p.Value.Length > 0))
+                    if (!KeyboardShortcuts.TryParseHotkey(pair.Value, out uint modifiers, out int key) || !combinations.Add((modifiers, key))) return false;
+            }
+            var changes = edited.Where(p => p.Value != current[p.Key]).ToDictionary(p => p.Key, p => p.Value);
+            if (!PreferenceCommit.TryUpdate(_configValues, changes, candidate => WriteConfig("Default", candidate), out var error))
+            { _saveErrorReporter(error!); return false; }
+            if (advanced) _ignorePhraseSet = null;
+            return true;
+        }
+
+        internal IReadOnlyDictionary<string, string> ReadResultPreferences() =>
+            ResultPreferenceDraft.Defaults.ToDictionary(p => p.Key,
+                p => p.Value is "true" or "false" ? (GetBoolValue(p.Key, p.Value == "true") ? "true" : "false") : GetValue(p.Key, p.Value));
+
+        internal bool TrySaveResultPreferences(IReadOnlyDictionary<string, string> expected,
+            IReadOnlyDictionary<string, string> edited, out bool conflict)
+        {
+            var current = ReadResultPreferences();
+            conflict = !ResultPreferenceDraft.Same(expected, current);
+            if (conflict || ResultPreferenceDraft.Validate(edited) != null) return false;
+            var changes = edited.Where(p => p.Value != current[p.Key]).ToDictionary(p => p.Key, p => p.Value);
+            if (PreferenceCommit.TryUpdate(_configValues, changes,
+                candidate => WriteConfig("Default", candidate), out var error)) return true;
+            _saveErrorReporter(error!);
+            return false;
+        }
+
+        internal CapturePreferenceValues ReadCapturePreferences() => new(GetOcrMethod(), GetSelectedScreenIndex(),
+            IsAutoOCREnabled(), IsAutoTranslateEnabled(), IsMultiSelectionAreaEnabled(), IsMangaModeEnabled());
+
+        internal static string ReadCaptureScreenTopology() => DescribeCaptureScreens(System.Windows.Forms.Screen.AllScreens);
+
+        internal static string DescribeCaptureScreens(IEnumerable<System.Windows.Forms.Screen> screens) =>
+            string.Join(";", screens.Select(screen => screen.DeviceName + ":" + screen.Bounds));
+
+        internal bool TrySaveCapturePreferences(CapturePreferenceValues expected, CapturePreferenceValues edited,
+            string expectedTopology, out string? issue)
+        {
+            issue = null;
+            if (ReadCapturePreferences() != expected) { issue = "Draft_CaptureConflict"; return false; }
+            try
+            {
+                // Validate against the current devices as well as the UI's opening snapshot.
+                var screens = System.Windows.Forms.Screen.AllScreens;
+                if (DescribeCaptureScreens(screens) != expectedTopology) { issue = "Draft_CaptureTopologyChanged"; return false; }
+                issue = edited.Validate(Enumerable.Range(0, screens.Length).ToArray(), NativeOcrAssets.IsAvailable);
+                if (issue != null) return false;
+                var changes = new Dictionary<string, string>
+                {
+                    [OCR_METHOD] = edited.OcrMethod,
+                    [SELECTED_SCREEN_INDEX] = edited.ScreenIndex.ToString(CultureInfo.InvariantCulture),
+                    [AUTO_OCR] = edited.AutoOcr ? "true" : "false",
+                    [AUTO_TRANSLATE_ENABLED] = edited.AutoTranslate ? "true" : "false",
+                    [MULTI_SELECTION_AREA] = edited.MultipleAreas ? "true" : "false",
+                    [MANGA_MODE] = edited.MangaMode ? "true" : "false"
+                };
+                if (PreferenceCommit.TryUpdate(_configValues, changes,
+                    candidate => WriteConfig("Default", candidate), out var error)) return true;
+                _saveErrorReporter(error!);
+            }
+            catch (Exception error) { _saveErrorReporter(error); }
+            issue = "Draft_CaptureFailed";
+            return false;
         }
 
         public string GetOcrMethod()
@@ -1618,10 +1844,14 @@ namespace AlpWareStudio.Localay
         public string GetServicePrompt(string service)
         {
             // Google Translate/Yandex don't use prompts
-            if (service == "Google Translate" || service == "Yandex")
+            if (service == "Google Translate" || service == "Yandex" || service == MarianTranslationService.ServiceName)
             {
                 return "";
             }
+
+            // New edits share the atomic main configuration. Legacy files remain read-only fallback.
+            if (_configValues.TryGetValue(ServicePreferenceDraft.PromptKey(service), out string? savedPrompt))
+                return savedPrompt;
 
             string filePath;
 
@@ -1682,54 +1912,11 @@ namespace AlpWareStudio.Localay
         // Save prompt for specific translation service
         public bool SaveServicePrompt(string service, string prompt)
         {
-            // Google Translate/Yandex don't use prompts
-            if (service == "Google Translate" || service == "Yandex")
-            {
-                return true;
-            }
-
-            string filePath;
-
-            switch (service)
-            {
-                case "Gemini":
-                    filePath = _geminiConfigFilePath;
-                    break;
-                case "Ollama":
-                    filePath = _ollamaConfigFilePath;
-                    break;
-                case "LM Studio":
-                    filePath = _lmstudioConfigFilePath;
-                    break;
-                case "ChatGPT":
-                    filePath = _chatgptConfigFilePath;
-                    break;
-                case "Mistral":
-                    filePath = _mistralConfigFilePath;
-                    break;
-                case "Groq":
-                    filePath = _groqConfigFilePath;
-                    break;
-                case "Custom API":
-                    filePath = _customApiConfigFilePath;
-                    break;
-                default:
-                    filePath = _geminiConfigFilePath;
-                    break;
-            }
-
-            try
-            {
-                string content = $"<llm_prompt_multi_start>\n{prompt}\n<llm_prompt_multi_end>";
-                File.WriteAllText(filePath, content);
-                Console.WriteLine($"Saved {service} prompt ({prompt.Length} chars)");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error saving service prompt: {ex.Message}");
-                return false;
-            }
+            if (!ServicePreferenceDraft.Services.Contains(service)) return false;
+            if (!ServicePreferenceDraft.UsesPrompt(service)) return true;
+            string key = ServicePreferenceDraft.PromptKey(service);
+            if (string.IsNullOrWhiteSpace(prompt) || prompt.Contains("<" + key + "_end>")) return false;
+            return SetPreference(key, prompt.Trim());
         }
 
         // Check if auto sizing text blocks is enabled
@@ -1746,11 +1933,36 @@ namespace AlpWareStudio.Localay
             return PreferenceRules.ResolveThemeMode(mode, legacyDark);
         }
 
-        public void SetThemeMode(string mode)
+        public bool SetThemeMode(string mode) =>
+            SetPreference(THEME_MODE, PreferenceRules.ResolveThemeMode(mode), DARK_MODE);
+
+        internal GeneralPreferenceValues ReadGeneralPreferences() =>
+            new(GetLanguageInterface(), GetThemeMode(), IsClipboardAutoTranslateEnabled(), IsClipboardCopyResultEnabled(),
+                GetClipboardDebounceMs().ToString(CultureInfo.InvariantCulture),
+                GetClipboardMaxChars().ToString(CultureInfo.InvariantCulture), GetBoolValue("clipboard_privacy_consent_v1"));
+
+        // Called on the application dispatcher. Merge only the General page into the
+        // latest configuration, preserving credentials and unrelated settings edits.
+        internal bool TrySaveGeneralPreferences(GeneralPreferenceValues expected,
+            GeneralPreferenceValues edited, out bool conflict)
         {
-            _configValues[THEME_MODE] = PreferenceRules.ResolveThemeMode(mode);
-            _configValues.Remove(DARK_MODE);
-            SaveConfig();
+            conflict = ReadGeneralPreferences() != expected;
+            if (conflict) return false;
+            if (edited.ValidationIssue != null) return false;
+            var changes = new Dictionary<string, string>
+            {
+                [LANGUAGE_INTERFACE] = PreferenceRules.NormalizeLanguagePreference(edited.Language),
+                [THEME_MODE] = PreferenceRules.ResolveThemeMode(edited.Theme),
+                [CLIPBOARD_AUTO_TRANSLATE_ENABLED] = edited.ClipboardEnabled ? "true" : "false",
+                [CLIPBOARD_AUTO_TRANSLATE_COPY_RESULT] = edited.ClipboardCopyResult ? "true" : "false",
+                [CLIPBOARD_AUTO_TRANSLATE_DEBOUNCE_MS] = int.Parse(edited.ClipboardDebounce, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                [CLIPBOARD_AUTO_TRANSLATE_MAX_CHARS] = int.Parse(edited.ClipboardMaxChars, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture),
+                ["clipboard_privacy_consent_v1"] = edited.ClipboardEnabled && edited.ClipboardConsent ? "true" : "false"
+            };
+            if (PreferenceCommit.TryUpdate(_configValues, changes,
+                candidate => WriteConfig("Default", candidate), out var error, DARK_MODE)) return true;
+            _saveErrorReporter(error!);
+            return false;
         }
 
         // Compatibility helpers: the boolean describes the applied theme, not the stored system preference.
@@ -2408,15 +2620,8 @@ namespace AlpWareStudio.Localay
             return PreferenceRules.NormalizeLanguagePreference(GetValue(LANGUAGE_INTERFACE, PreferenceRules.System));
         }
 
-        public void SetLanguageInterface(string language)
-        {
-            if (!string.IsNullOrWhiteSpace(language))
-            {
-                _configValues[LANGUAGE_INTERFACE] = PreferenceRules.NormalizeLanguagePreference(language);
-                SaveConfig();
-                Console.WriteLine($"Language interface set to: {language}");
-            }
-        }
+        public bool SetLanguageInterface(string language) =>
+            SetPreference(LANGUAGE_INTERFACE, PreferenceRules.NormalizeLanguagePreference(language));
 
         // Get/Set target language
         public string GetTargetLanguage()
@@ -2665,7 +2870,7 @@ namespace AlpWareStudio.Localay
         public int GetClipboardDebounceMs()
         {
             string value = GetValue(CLIPBOARD_AUTO_TRANSLATE_DEBOUNCE_MS, "300");
-            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int clipboardDebounce) && clipboardDebounce >= 0 && clipboardDebounce <= 1)
+            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int clipboardDebounce) && clipboardDebounce >= 100 && clipboardDebounce <= 2000)
             {
                 return clipboardDebounce;
             }
@@ -3311,7 +3516,7 @@ namespace AlpWareStudio.Localay
             return set;
         }
 
-        private static List<(string, IgnorePhraseMatchType)> ParseIgnorePhrases(string value)
+        internal static List<(string, IgnorePhraseMatchType)> ParseIgnorePhrases(string value)
         {
             var result = new List<(string, IgnorePhraseMatchType)>();
             if (string.IsNullOrEmpty(value))
@@ -3355,7 +3560,7 @@ namespace AlpWareStudio.Localay
         // containing '|' (e.g. the regex "Skip|Next") split into extra fields and shifted every
         // later entry: phrases became match types and vice versa. '%', '|' and line breaks are
         // percent-encoded; decoding is a single pass so "%257C" round-trips as "%7C".
-        private static string EncodeIgnorePhrase(string phrase)
+        internal static string EncodeIgnorePhrase(string phrase)
         {
             return phrase.Replace("%", "%25").Replace("|", "%7C").Replace("\r", "%0D").Replace("\n", "%0A");
         }
@@ -3549,7 +3754,10 @@ namespace AlpWareStudio.Localay
             {
                 "Gemini" => GetGeminiModel(),
                 "ChatGPT" => GetChatGptModel(),
-                "Ollama" => GetOllamaModel(),
+                "Ollama" => TranslateGemmaClient.IsCandidate(GetOllamaModel())
+                    ? GetOllamaModel() + "|" + GetOllamaApiEndpoint() + "|" + TranslateGemmaClient.TemplateVersion
+                    : GetOllamaModel(),
+                MarianTranslationService.ServiceName => MarianTranslationService.CacheIdentity,
                 "LM Studio" => GetLMStudioModel(),
                 "Custom API" => GetCustomApiModel(),
                 "Groq" => GetGroqModel(),

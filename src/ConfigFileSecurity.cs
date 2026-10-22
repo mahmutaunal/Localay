@@ -11,7 +11,13 @@ internal static class ConfigFileSecurity
         key.Contains("api_key", StringComparison.OrdinalIgnoreCase) ||
         key.EndsWith("signature_key", StringComparison.OrdinalIgnoreCase);
 
-    internal static bool IsProfilePrivate(string key) => IsSecret(key) ||
+    private static bool IsInterfacePreference(string key) =>
+        key.Equals("language_interface", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("theme_mode", StringComparison.OrdinalIgnoreCase) ||
+        key.Equals("dark_mode", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsProfilePrivate(string key) => IsSecret(key) || IsInterfacePreference(key) ||
+        (key.StartsWith("service_", StringComparison.Ordinal) && key.EndsWith("_prompt_template", StringComparison.Ordinal)) ||
         key.Equals("clipboard_privacy_consent_v1", StringComparison.OrdinalIgnoreCase) ||
         key.Equals("clipboard_auto_translate_enabled", StringComparison.OrdinalIgnoreCase);
 
@@ -38,14 +44,16 @@ internal static class ConfigFileSecurity
     }
 
     // Used before importing legacy files, never copy plaintext keys or include them in profiles.
-    internal static string RewriteSecrets(string document, bool includeSecrets)
+    internal static string RewriteSecrets(string document, bool includeSecrets, bool preserveInterfacePreferences = false)
     {
+        bool Rewrite(string key) => includeSecrets ? IsSecret(key) :
+            IsProfilePrivate(key) && !(preserveInterfacePreferences && IsInterfacePreference(key));
         document = Regex.Replace(document, @"<(\w+)_start>(.*?)<\1_end>", m =>
-            !(includeSecrets ? IsSecret(m.Groups[1].Value) : IsProfilePrivate(m.Groups[1].Value)) ? m.Value : includeSecrets
+            !Rewrite(m.Groups[1].Value) ? m.Value : includeSecrets
                 ? $"{m.Groups[1].Value}|{Protect(m.Groups[2].Value)}|" : "", RegexOptions.Singleline);
         return Regex.Replace(document, @"^([ \t]*)(\w+)\|([^\r\n]*)\r?$", m =>
         {
-            if (!(includeSecrets ? IsSecret(m.Groups[2].Value) : IsProfilePrivate(m.Groups[2].Value))) return m.Value;
+            if (!Rewrite(m.Groups[2].Value)) return m.Value;
             if (!includeSecrets) return "";
             string value = m.Groups[3].Value.TrimEnd('\r');
             if (value.EndsWith('|')) value = value[..^1];

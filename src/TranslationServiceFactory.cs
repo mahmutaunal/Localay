@@ -19,6 +19,7 @@ namespace AlpWareStudio.Localay
             {
                 "Gemini" => new GeminiTranslationService(),
                 "Ollama" => new OllamaTranslationService(),
+                MarianTranslationService.ServiceName => new MarianTranslationService(),
                 "LM Studio" => new LMStudioTranslationService(),
                 "ChatGPT" => new ChatGptTranslationService(),
                 "Custom API" => new CustomApiTranslationService(),
@@ -42,6 +43,7 @@ namespace AlpWareStudio.Localay
             {
                 "Gemini" => new GeminiTranslationService(),
                 "Ollama" => new OllamaTranslationService(),
+                MarianTranslationService.ServiceName => new MarianTranslationService(),
                 "LM Studio" => new LMStudioTranslationService(),
                 "ChatGPT" => new ChatGptTranslationService(),
                 "Custom API" => new CustomApiTranslationService(),

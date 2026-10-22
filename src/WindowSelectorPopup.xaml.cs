@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -52,7 +53,14 @@ namespace AlpWareStudio.Localay
             EnumWindows(EnumWindowsProcCallback, IntPtr.Zero);
 
          
-            foreach (var window in windows)
+            RenderWindowList();
+        }
+
+        private void RenderWindowList()
+        {
+            windowListView.Items.Clear();
+            foreach (var window in windows.Where(window => string.IsNullOrWhiteSpace(windowSearchBox.Text) ||
+                window.Title.Contains(windowSearchBox.Text, StringComparison.CurrentCultureIgnoreCase)))
             {
                 var item = new System.Windows.Controls.ListViewItem
                 {
@@ -81,6 +89,8 @@ namespace AlpWareStudio.Localay
 
                 windowListView.Items.Add(item);
             }
+            emptyWindowListText.Visibility = windowListView.Items.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+            selectButton.IsEnabled = windowListView.SelectedItem != null;
         }
 
         private bool EnumWindowsProcCallback(IntPtr hWnd, IntPtr lParam)
@@ -178,6 +188,16 @@ namespace AlpWareStudio.Localay
 
         [DllImport("user32.dll")]
         private static extern IntPtr GetClassLongPtr(IntPtr hWnd, int nIndex);
+
+        private void WindowSearch_Changed(object sender, TextChangedEventArgs e)
+        {
+            if (windowListView != null && selectButton != null && emptyWindowListText != null) RenderWindowList();
+        }
+
+        private void WindowSelection_Changed(object sender, SelectionChangedEventArgs e)
+        {
+            if (selectButton != null) selectButton.IsEnabled = windowListView.SelectedItem != null;
+        }
 
         private void RefreshButton_Click(object sender, RoutedEventArgs e)
         {

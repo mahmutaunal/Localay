@@ -4,10 +4,32 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NuGetAudit>true</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/PipelineTiming.cs" Link="PipelineTiming.cs" />
+    <Compile Include="../../src/CaptureWorkState.cs" Link="CaptureWorkState.cs" />
+    <Compile Include="../../src/OcrCapturePolicy.cs" Link="OcrCapturePolicy.cs" />
+    <Compile Include="../TranslationResilienceChecks/TranslationPipelineChecks.cs" Link="TranslationPipelineChecks.cs" />
+    <Compile Include="../../src/TranslationBlockProtocol.cs" Link="TranslationBlockProtocol.cs" />
+    <Compile Include="../../src/TranslationBatchCoordinator.cs" Link="TranslationBatchCoordinator.cs" />
+    <Compile Include="../../src/GoogleTranslateFreeClient.cs" Link="GoogleTranslateFreeClient.cs" />
+    <Compile Include="../../src/GoogleTranslateWebToken.cs" Link="GoogleTranslateWebToken.cs" />
     <Compile Include="../../src/TranslationFailure.cs" Link="TranslationFailure.cs" />
     <Compile Include="../../src/PipelineLifetime.cs" Link="PipelineLifetime.cs" />
+    <Compile Include="../../src/OcrSceneState.cs" Link="OcrSceneState.cs" />
     <Compile Include="../../src/TranslationRequestContext.cs" Link="TranslationRequestContext.cs" />
     <Compile Include="../../src/ITranslationService.cs" Link="ITranslationService.cs" />
     <Compile Include="../../src/TranslationCache.cs" Link="TranslationCache.cs" />
+
+    <Compile Include="../../src/SingleResourceCache.cs" Link="SingleResourceCache.cs" />
+    <Compile Include="../../src/OverlayPlacementPolicy.cs" Link="OverlayPlacementPolicy.cs" />
+    <Compile Include="../../src/TextMaskProtection.cs" Link="TextMaskProtection.cs" />
+    <Compile Include="../OverlayLayoutChecks/RenderingResourceChecks.cs" Link="RenderingResourceChecks.cs" />
+    <Compile Include="../../src/TranslateGemmaClient.cs" Link="TranslateGemmaClient.cs" />
+    <Compile Include="../../src/MarianTranslationService.cs" Link="MarianTranslationService.cs" />
+    <Compile Include="../../src/LocalModelDecision.cs" Link="LocalModelDecision.cs" />
+    <Compile Include="../TranslationResilienceChecks/LocalModelChecks.cs" Link="LocalModelChecks.cs" />
+    <Compile Include="../../src/OcrSettlement.cs" Link="OcrSettlement.cs" />
+    <Compile Include="../../src/FrameChangeMap.cs" Link="FrameChangeMap.cs" />
+    <Compile Include="../../src/OcrFrameObservation.cs" Link="OcrFrameObservation.cs" />
+    <Compile Include="../OcrSceneChecks/OcrSettlementChecks.cs" Link="OcrSettlementChecks.cs" />
   </ItemGroup>
 </Project>

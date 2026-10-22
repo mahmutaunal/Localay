@@ -62,6 +62,7 @@ namespace RST
         private IntPtr _hwnd = IntPtr.Zero;
         private HwndSource? _hwndSource;
         private bool _isListening;
+        private Window? _startWhenLoadedWindow;
         private bool _disposed;
         
         // Debounce support
@@ -125,10 +126,13 @@ namespace RST
                 if (_hwnd == IntPtr.Zero)
                 {
                     // Window not yet loaded, wait for it
-                    window.Loaded += (s, e) => StartListening(window);
+                    CancelDeferredStart();
+                    _startWhenLoadedWindow = window;
+                    window.Loaded += StartWhenLoaded;
                     return;
                 }
                 
+                CancelDeferredStart();
                 _hwndSource = HwndSource.FromHwnd(_hwnd);
                 _hwndSource?.AddHook(WndProc);
                 
@@ -155,11 +159,26 @@ namespace RST
             }
         }
         
-        /// <summary>
-        /// Stops listening for clipboard changes.
-        /// </summary>
+        private void CancelDeferredStart()
+        {
+            if (_startWhenLoadedWindow == null) return;
+            _startWhenLoadedWindow.Loaded -= StartWhenLoaded;
+            _startWhenLoadedWindow = null;
+        }
+
+        private void StartWhenLoaded(object sender, RoutedEventArgs e)
+        {
+            var window = _startWhenLoadedWindow;
+            CancelDeferredStart();
+            if (window != null) StartListening(window);
+        }
+
+        /// <summary>Stops listening and discards text/deferred startup from the old settings.</summary>
         public void StopListening()
         {
+            CancelDeferredStart();
+            _debounceTimer?.Stop();
+            _pendingText = null;
             if (!_isListening) return;
             
             try
@@ -272,7 +291,7 @@ namespace RST
         {
             _debounceTimer?.Stop();
             
-            if (string.IsNullOrWhiteSpace(_pendingText)) return;
+            if (!_isListening || string.IsNullOrWhiteSpace(_pendingText)) return;
             
             string textToProcess = _pendingText;
             _pendingText = null;

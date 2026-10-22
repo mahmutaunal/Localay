@@ -17,6 +17,17 @@ namespace AlpWareStudio.Localay
         private IntPtr _d3dContext;
         private IDirect3DDevice? _winrtDevice;
         private bool _disposed;
+        private readonly SingleResourceCache<(uint Width, uint Height, int Format), StagingTexture> _staging = new(t => t.Dispose());
+        private sealed class StagingTexture(IntPtr pointer) : IDisposable
+        {
+            internal IntPtr Pointer { get; private set; } = pointer;
+            public void Dispose()
+            {
+                if (Pointer == IntPtr.Zero) return;
+                Marshal.Release(Pointer);
+                Pointer = IntPtr.Zero;
+            }
+        }
 
         public IDirect3DDevice WinRTDevice =>
             _winrtDevice ?? throw new ObjectDisposedException(nameof(Direct3D11Helper));
@@ -152,10 +163,15 @@ namespace AlpWareStudio.Localay
                 MiscFlags = 0
             };
 
-            var createTex = VTable<CreateTexture2DDelegate>(_d3dDevice, SLOT_Device_CreateTexture2D);
-            int hr = createTex(_d3dDevice, ref stagingDesc, IntPtr.Zero, out IntPtr stagingTexture);
-            Marshal.ThrowExceptionForHR(hr);
-
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var retained = _staging.GetOrCreate((desc.Width, desc.Height, desc.Format), () =>
+            {
+                var createTex = VTable<CreateTexture2DDelegate>(_d3dDevice, SLOT_Device_CreateTexture2D);
+                int result = createTex(_d3dDevice, ref stagingDesc, IntPtr.Zero, out IntPtr texture);
+                Marshal.ThrowExceptionForHR(result);
+                return new StagingTexture(texture);
+            });
+            IntPtr stagingTexture = retained.Pointer;
             try
             {
                 // GPU → staging copy.
@@ -164,33 +180,29 @@ namespace AlpWareStudio.Localay
 
                 // Map for CPU read.
                 var map = VTable<MapDelegate>(_d3dContext, SLOT_Context_Map);
-                hr = map(_d3dContext, stagingTexture, 0, D3D11_MAP_READ, 0, out D3D11_MAPPED_SUBRESOURCE mapped);
+                int hr = map(_d3dContext, stagingTexture, 0, D3D11_MAP_READ, 0, out D3D11_MAPPED_SUBRESOURCE mapped);
                 Marshal.ThrowExceptionForHR(hr);
 
                 try
                 {
                     var bitmap = new Bitmap(width, height, PixelFormat.Format32bppArgb);
-                    var bitmapData = bitmap.LockBits(
-                        new Rectangle(0, 0, width, height),
-                        ImageLockMode.WriteOnly,
-                        PixelFormat.Format32bppArgb);
-
                     try
                     {
-                        int bytesPerRow = width * 4;
-                        for (int row = 0; row < height; row++)
+                        var bitmapData = bitmap.LockBits(new Rectangle(0, 0, width, height), ImageLockMode.WriteOnly, PixelFormat.Format32bppArgb);
+                        try
                         {
-                            IntPtr srcRow = IntPtr.Add(mapped.pData, row * (int)mapped.RowPitch);
-                            IntPtr dstRow = IntPtr.Add(bitmapData.Scan0, row * bitmapData.Stride);
-                            RtlMoveMemory(dstRow, srcRow, (uint)bytesPerRow);
+                            int bytesPerRow = width * 4;
+                            for (int row = 0; row < height; row++)
+                            {
+                                IntPtr srcRow = IntPtr.Add(mapped.pData, row * (int)mapped.RowPitch);
+                                IntPtr dstRow = IntPtr.Add(bitmapData.Scan0, row * bitmapData.Stride);
+                                RtlMoveMemory(dstRow, srcRow, (uint)bytesPerRow);
+                            }
                         }
+                        finally { bitmap.UnlockBits(bitmapData); }
+                        return bitmap;
                     }
-                    finally
-                    {
-                        bitmap.UnlockBits(bitmapData);
-                    }
-
-                    return bitmap;
+                    catch { bitmap.Dispose(); throw; }
                 }
                 finally
                 {
@@ -198,9 +210,11 @@ namespace AlpWareStudio.Localay
                     unmap(_d3dContext, stagingTexture, 0);
                 }
             }
-            finally
+            catch
             {
-                Marshal.Release(stagingTexture);
+                // Device/map failures must not leave an unusable texture cached.
+                _staging.Clear();
+                throw;
             }
         }
 
@@ -209,11 +223,23 @@ namespace AlpWareStudio.Localay
             if (_disposed) return;
             _disposed = true;
 
-            _winrtDevice?.Dispose();
-            _winrtDevice = null;
-
-            if (_d3dContext != IntPtr.Zero) { Marshal.Release(_d3dContext); _d3dContext = IntPtr.Zero; }
-            if (_d3dDevice != IntPtr.Zero) { Marshal.Release(_d3dDevice); _d3dDevice = IntPtr.Zero; }
+            try { _staging.Dispose(); }
+            finally
+            {
+                try { _winrtDevice?.Dispose(); }
+                finally
+                {
+                    _winrtDevice = null;
+                    try
+                    {
+                        if (_d3dContext != IntPtr.Zero) { Marshal.Release(_d3dContext); _d3dContext = IntPtr.Zero; }
+                    }
+                    finally
+                    {
+                        if (_d3dDevice != IntPtr.Zero) { Marshal.Release(_d3dDevice); _d3dDevice = IntPtr.Zero; }
+                    }
+                }
+            }
         }
 
         // ───────── COM vtable helper ─────────

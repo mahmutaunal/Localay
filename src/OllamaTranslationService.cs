@@ -22,9 +22,11 @@ namespace AlpWareStudio.Localay
             var timer = System.Diagnostics.Stopwatch.StartNew();
             string endpoint = ConfigManager.Instance.GetOllamaApiEndpoint();
             string model = ConfigManager.Instance.GetOllamaModel();
-            string json = System.Text.Json.JsonSerializer.Serialize(new { model, keep_alive = "30m" });
+            string json = System.Text.Json.JsonSerializer.Serialize(new { model,
+                keep_alive = TranslateGemmaClient.IsCandidate(model) ? "5m" : "30m" });
             using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync(endpoint, content, TranslationRequestContext.Cancellation);
+            response.EnsureSuccessStatusCode();
             Console.WriteLine($"[WarmUp] Ollama: model '{model}' loaded in {timer.ElapsedMilliseconds} ms ({(int)response.StatusCode})");
         }
 
@@ -41,6 +43,13 @@ namespace AlpWareStudio.Localay
                 // Get the Ollama API endpoint and model from config
                 string ollamaEndpoint = ConfigManager.Instance.GetOllamaApiEndpoint();
                 string ollamaModel = ConfigManager.Instance.GetOllamaModel();
+                if (TranslateGemmaClient.IsCandidate(ollamaModel))
+                {
+                    string? translated = await new TranslateGemmaClient(_httpClient, new Uri(ollamaEndpoint), ollamaModel)
+                        .TranslateAsync(jsonData, TranslationRequestContext.Cancellation);
+                    if (translated != null) TranslationErrorNotifier.Reset("Ollama");
+                    return translated;
+                }
                 
                 // Create Ollama API request
                 var requestContent = new
@@ -63,11 +72,11 @@ namespace AlpWareStudio.Localay
                     Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
                 };
                 string requestJson = JsonSerializer.Serialize(requestContent, jsonOptions);
-                var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
+                using var content = new StringContent(requestJson, Encoding.UTF8, "application/json");
                 
                 Console.WriteLine($"Sending request to Ollama API at: {ollamaEndpoint}");
                 
-                HttpResponseMessage response = await _httpClient.PostAsync(ollamaEndpoint, content, TranslationRequestContext.Cancellation);
+                using HttpResponseMessage response = await _httpClient.PostAsync(ollamaEndpoint, content, TranslationRequestContext.Cancellation);
                 
                 if (response.IsSuccessStatusCode)
                 {
@@ -222,6 +231,14 @@ namespace AlpWareStudio.Localay
                     
                     return null;
                 }
+            }
+            catch (OperationCanceledException) when (TranslationRequestContext.Cancellation.IsCancellationRequested) { throw; }
+            catch (ArgumentException ex)
+            {
+                TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidRequest));
+                TranslationErrorNotifier.ShowOnce("Ollama", ex.Message,
+                    LocalizationManager.Instance.Strings["Title_OllamaError"]);
+                return null;
             }
             catch (Exception ex)
             {

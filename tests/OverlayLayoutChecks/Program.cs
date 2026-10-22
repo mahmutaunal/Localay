@@ -45,4 +45,5 @@ Check(pixels.ToDips(0, double.NaN) == pixels, "invalid DPI falls back to one wit
 var original = pixels.ToDips(1, 1);
 for (int i = 0; i < 100; i++) { _ = pixels.ToDips(1.5, 1.5); _ = pixels.ToDips(2, 2); }
 Check(pixels.ToDips(1, 1) == original, "repeated monitor changes do not compound DPI scaling");
+RenderingResourceChecks.Run(Check);
 Console.WriteLine($"{passed} portable overlay layout checks passed. WPF shaping and physical monitors require Windows.");

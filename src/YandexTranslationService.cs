@@ -62,6 +62,15 @@ namespace AlpWareStudio.Localay
                 sourceLanguage = MapLanguageToYandexCode(sourceLanguage);
                 targetLanguage = MapLanguageToYandexCode(targetLanguage);
 
+                if (TranslationBlockProtocol.IsEnabled(root))
+                {
+                    var blocks = TranslationBlockProtocol.ReadBlocks(root);
+                    var values = await TranslateBatchWithYandexAsync(blocks.Select(b => NormalizeText(b.Text)).ToArray(), sourceLanguage, targetLanguage);
+                    string? direct = TranslationBlockProtocol.DirectResponse(blocks, values);
+                    if (direct == null) TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidResponse));
+                    return direct;
+                }
+
                 outputJson.WritePropertyName("translations");
                 outputJson.WriteStartArray();
 

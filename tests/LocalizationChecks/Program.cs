@@ -54,7 +54,7 @@ var identifiers = new HashSet<string>(StringComparer.Ordinal)
     "meta-llama/llama-prompt-guard-2-86m", "meta-llama/llama-prompt-guard-2-22m", "meta-llama/llama-guard-4-12b",
     "mistral-medium", "open-mistral-nemo", "mistral-small-2503", "GPT-4.1", "GPT-5.1", "GPT-4.1 Nano", "GPT-4.1 Mini", "GPT-5-Mini", "llama3", "http://localhost"
 };
-var displayedIdentifiers = new Dictionary<string, string> { ["Custom API"] = "Service_CustomApi", ["Free Web Service"] = "Google_FreeService", ["Cloud API (paid)"] = "Google_CloudService" };
+var displayedIdentifiers = new Dictionary<string, string> { ["Custom API"] = "Service_CustomApi", ["Marian (local)"] = "Service_Marian", ["Free Web Service"] = "Google_FreeService", ["Cloud API (paid)"] = "Google_CloudService" };
 var xamlNamespace = XNamespace.Get("http://schemas.microsoft.com/winfx/2006/xaml/presentation");
 foreach (string path in Directory.GetFiles(Path.Combine(repo, "src"), "*.xaml"))
 {

@@ -2,6 +2,12 @@ name: Build Windows Installer
 
 on:
   workflow_dispatch:
+    inputs:
+      scan_with_defender:
+        description: "Also validate payload and installer with Microsoft Defender"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -42,6 +48,20 @@ jobs:
           dotnet restore ./Localay.csproj -r win-x64 --locked-mode
           if ($LASTEXITCODE -ne 0) { throw 'Dependency restore failed.' }
 
+      - name: Verify startup, Settings and translation lifecycle
+        timeout-minutes: 5
+        run: |
+          dotnet run --project ./tests/StartupChecks/StartupChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Startup isolation checks failed.' }
+          dotnet run --project ./tests/PreferencePersistenceChecks/PreferencePersistenceChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Preference persistence checks failed.' }
+          dotnet run --project ./tests/OcrSceneChecks/OcrSceneChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'OCR scene ownership checks failed.' }
+          dotnet run --project ./tests/LifetimeChecks/LifetimeChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Translation stop/restart checks failed.' }
+          dotnet run --project ./tests/UiWindowsChecks/UiWindowsChecks.csproj -c Release
+          if ($LASTEXITCODE -ne 0) { throw 'Windows WPF checks failed.' }
+
       - name: Publish Windows application
         run: |
           dotnet publish ./Localay.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/publish
@@ -56,6 +76,32 @@ jobs:
           $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe' -File)
           if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer.' }
 
+      # Opt-in: hosted Defender configuration must not change the normal build path.
+      - name: Prepare Defender on disposable runner
+        if: ${{ inputs.scan_with_defender }}
+        timeout-minutes: 5
+        run: ./.github/scripts/Prepare-Defender.ps1
+
+      - name: Scan published payload and installer
+        if: ${{ inputs.scan_with_defender }}
+        timeout-minutes: 10
+        run: |
+          ./Scan-Windows.ps1 -PathToScan ./artifacts/publish -ReportName defender-payload.json
+          ./Scan-Windows.ps1 -PathToScan ./artifacts/installer -ReportName defender-installer.json
+
+      - name: Verify installer artifact identity
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe' -File)
+          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer.' }
+          $installer = $installers[0]
+          $metadata = Get-Content -LiteralPath artifacts/installer/build-info.json -Raw | ConvertFrom-Json
+          $hash = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $checksum = (Get-Content -LiteralPath "$($installer.FullName).sha256" -Raw).Trim()
+          if ($metadata.File -cne $installer.Name -or $metadata.SHA256 -cne $hash -or
+              $checksum -cne "$hash  $($installer.Name)" -or $metadata.SourceCommit -cne $env:GITHUB_SHA) {
+            throw 'Installer, checksum or source identity changed before upload.'
+          }
+
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4
         with:
@@ -66,4 +112,15 @@ jobs:
             artifacts/installer/build-info.json
           if-no-files-found: error
           compression-level: 0
+          retention-days: 30
+
+      - name: Upload Defender diagnostics
+        if: ${{ always() && inputs.scan_with_defender }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: Localay-Defender-validation
+          path: |
+            artifacts/defender-*.json
+            artifacts/defender-*.log
+          if-no-files-found: warn
           retention-days: 30

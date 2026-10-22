@@ -15,6 +15,8 @@ namespace AlpWareStudio.Localay
         private readonly HttpClient _httpClient;
         private readonly SemaphoreSlim _seedGate = new SemaphoreSlim(1, 1);
         private readonly object _throttleLock = new object();
+        private readonly SemaphoreSlim _dispatchGate = new(1, 1);
+        private readonly TimeProvider _time;
         private DateTime _nextRequestUtc = DateTime.MinValue;
         private DateTime _cooldownUntilUtc = DateTime.MinValue;
         // Consecutive 429s without a Retry-After header; drives our own backoff.
@@ -35,8 +37,8 @@ namespace AlpWareStudio.Localay
             {
                 lock (_throttleLock)
                 {
-                    bool cooling = DateTime.UtcNow < _cooldownUntilUtc;
-                    if (cooling) TranslationRequestContext.ReportFailure(new(_cooldownKind, _cooldownUntilUtc - DateTime.UtcNow));
+                    bool cooling = _time.GetUtcNow().UtcDateTime < _cooldownUntilUtc;
+                    if (cooling) TranslationRequestContext.ReportFailure(new(_cooldownKind, _cooldownUntilUtc - _time.GetUtcNow().UtcDateTime));
                     return cooling;
                 }
             }
@@ -44,7 +46,11 @@ namespace AlpWareStudio.Localay
         private string? _seed;
         private DateTime _seedRefreshAfterUtc = DateTime.MinValue;
 
-        internal GoogleTranslateFreeClient(HttpClient httpClient) => _httpClient = httpClient;
+        internal GoogleTranslateFreeClient(HttpClient httpClient, TimeProvider? timeProvider = null)
+        {
+            _httpClient = httpClient;
+            _time = timeProvider ?? TimeProvider.System;
+        }
 
         internal async Task<string?> TranslateAsync(string text, string source, string target, CancellationToken cancellationToken)
         {
@@ -154,12 +160,12 @@ namespace AlpWareStudio.Localay
             await _seedGate.WaitAsync(cancellationToken);
             try
             {
-                if (!forceRefresh && DateTime.UtcNow < _seedRefreshAfterUtc)
+                if (!forceRefresh && _time.GetUtcNow().UtcDateTime < _seedRefreshAfterUtc)
                     return _seed;
 
                 _seed = null;
                 // Missing TKK is normal on newer Google pages. Do not fetch the page per OCR block.
-                _seedRefreshAfterUtc = DateTime.UtcNow.AddMinutes(5);
+                _seedRefreshAfterUtc = _time.GetUtcNow().UtcDateTime.AddMinutes(5);
                 using var requestCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 requestCts.CancelAfter(SeedTimeoutMs);
                 try
@@ -180,7 +186,7 @@ namespace AlpWareStudio.Localay
                     string html = await response.Content.ReadAsStringAsync(requestCts.Token);
                     _seed = GoogleTranslateWebToken.ExtractSeed(html);
                     if (_seed != null)
-                        _seedRefreshAfterUtc = DateTime.UtcNow.AddMinutes(30);
+                        _seedRefreshAfterUtc = _time.GetUtcNow().UtcDateTime.AddMinutes(30);
                     else
                         Console.WriteLine("Google Web: TKK unavailable; skipping signed fallback for 5 minutes.");
                     return _seed;
@@ -215,7 +221,7 @@ namespace AlpWareStudio.Localay
                 if (_seed == seed)
                 {
                     _seed = null;
-                    _seedRefreshAfterUtc = DateTime.UtcNow.AddMinutes(5);
+                    _seedRefreshAfterUtc = _time.GetUtcNow().UtcDateTime.AddMinutes(5);
                 }
             }
             finally
@@ -251,7 +257,7 @@ namespace AlpWareStudio.Localay
                 _rateLimitStrikes++;
                 double seconds = MinRateLimitCooldown.TotalSeconds * Math.Pow(2, Math.Min(_rateLimitStrikes - 1, 10));
                 var cooldown = TimeSpan.FromSeconds(Math.Min(seconds, MaxRateLimitCooldown.TotalSeconds));
-                DateTime until = DateTime.UtcNow.Add(cooldown);
+                DateTime until = _time.GetUtcNow().UtcDateTime.Add(cooldown);
                 if (until > _cooldownUntilUtc)
                     _cooldownUntilUtc = until;
                 Console.WriteLine($"Google Translate: HTTP 429 (rate limited), pausing all requests for {cooldown.TotalSeconds:F0}s");
@@ -262,14 +268,14 @@ namespace AlpWareStudio.Localay
         {
             TimeSpan? delay = response.Headers.RetryAfter?.Delta;
             if (delay == null && response.Headers.RetryAfter?.Date is DateTimeOffset date)
-                delay = date - DateTimeOffset.UtcNow;
+                delay = date - _time.GetUtcNow();
             if (delay == null || delay <= TimeSpan.Zero)
                 return false;
             // Honor server cooldown across blocks/calls without keeping the UI waiting.
             lock (_throttleLock)
             {
                 _cooldownKind = TranslationFailure.FromStatus(response).Kind;
-                DateTime until = DateTime.UtcNow.Add(delay.Value);
+                DateTime until = _time.GetUtcNow().UtcDateTime.Add(delay.Value);
                 if (until > _cooldownUntilUtc)
                     _cooldownUntilUtc = until;
             }
@@ -278,22 +284,29 @@ namespace AlpWareStudio.Localay
 
         private async Task<bool> ThrottleAsync(CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            TimeSpan delay;
-            lock (_throttleLock)
+            // Only the head waiter computes a delay. Canceled queued calls never
+            // reserve timestamps several seconds into the future.
+            await _dispatchGate.WaitAsync(cancellationToken);
+            try
             {
-                DateTime now = DateTime.UtcNow;
-                if (now < _cooldownUntilUtc)
-                    return false;
-                DateTime scheduled = now > _nextRequestUtc ? now : _nextRequestUtc;
-                delay = scheduled - now;
-                _nextRequestUtc = scheduled.AddMilliseconds(MinRequestIntervalMs);
+                TimeSpan delay;
+                lock (_throttleLock)
+                {
+                    DateTime now = _time.GetUtcNow().UtcDateTime;
+                    if (now < _cooldownUntilUtc) return false;
+                    delay = _nextRequestUtc > now ? _nextRequestUtc - now : TimeSpan.Zero;
+                }
+                if (delay > TimeSpan.Zero) await Task.Delay(delay, _time, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                lock (_throttleLock)
+                {
+                    DateTime now = _time.GetUtcNow().UtcDateTime;
+                    if (now < _cooldownUntilUtc) return false;
+                    _nextRequestUtc = now.AddMilliseconds(MinRequestIntervalMs);
+                    return true;
+                }
             }
-            if (delay > TimeSpan.Zero)
-                await Task.Delay(delay, cancellationToken);
-            // Another request may have received Retry-After while this one was queued.
-            lock (_throttleLock)
-                return DateTime.UtcNow >= _cooldownUntilUtc;
+            finally { _dispatchGate.Release(); }
         }
 
         internal static string? ParseResponse(string body)

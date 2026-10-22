@@ -33,7 +33,7 @@ namespace AlpWareStudio.Localay
         /// Builds the cleaned patch for a text box (bitmap pixels). Returns null when the box is unusable.
         /// <paramref name="patchBounds"/> receives the patch position in bitmap pixels: the box plus a margin.
         /// </summary>
-        public static BitmapSource? CreateErasedPatch(Bitmap bitmap, Rectangle textBox, MediaColor background, out Rectangle patchBounds)
+        public static BitmapSource? CreateErasedPatch(Bitmap bitmap, Rectangle textBox, MediaColor background, out Rectangle patchBounds, IReadOnlyList<OverlayBox>? protectedSources = null)
         {
             var image = new Rectangle(0, 0, bitmap.Width, bitmap.Height);
             int margin = Math.Clamp(Math.Min(textBox.Width, textBox.Height) / 4, 3, 12);
@@ -59,6 +59,9 @@ namespace AlpWareStudio.Localay
             // Follow the strokes from inside the box into the margin and erase what stays connected.
             if (inkColor != null)
                 GrowMaskIntoMargin(mask, r, g, b, w, h, left, top, right, bottom, background, inkDistance, inkColor.Value);
+
+            if (protectedSources != null)
+                TextMaskProtection.Apply(mask, w, h, patchBounds.X, patchBounds.Y, protectedSources);
 
             // Other strokes in the margin (neighbouring text, bubble outlines) stay as they are but must
             // not be smeared into the fill. Judge them by closeness to the ink color rather than distance

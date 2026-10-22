@@ -54,8 +54,11 @@ try {
         $script:buildSucceeded = $true
     }
     Invoke-Check 'security-regressions' { Invoke-ProjectCheck 'SecurityChecks' }
+    Invoke-Check 'startup-isolation' { Invoke-ProjectCheck 'StartupChecks' }
     Invoke-Check 'ui-preferences' { Invoke-ProjectCheck 'PreferenceChecks' }
+    Invoke-Check 'preference-persistence' { Invoke-ProjectCheck 'PreferencePersistenceChecks' }
     Invoke-Check 'ocr-scene-regressions' { Invoke-ProjectCheck 'OcrSceneChecks' }
+    Invoke-Check 'pipeline-timing-regressions' { Invoke-ProjectCheck 'PipelineTimingChecks' }
     Invoke-Check 'request-lifetime-regressions' { Invoke-ProjectCheck 'LifetimeChecks' }
     Invoke-Check 'translation-resilience-regressions' { Invoke-ProjectCheck 'TranslationResilienceChecks' }
     Invoke-Check 'overlay-layout-regressions' { Invoke-ProjectCheck 'OverlayLayoutChecks' }

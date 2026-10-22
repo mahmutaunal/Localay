@@ -29,6 +29,9 @@ $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInv
 [pscustomobject]@{
     Version = $version; File = [IO.Path]::GetFileName($installer); SHA256 = $hash
     Compiler = $policy.version; CompilerDownloadSHA256 = $policy.sha256
+    SourceCommit = $env:GITHUB_SHA; WorkflowRunId = $env:GITHUB_RUN_ID
+    WorkflowRunAttempt = $env:GITHUB_RUN_ATTEMPT; RuntimeIdentifier = 'win-x64'
+    InstallScope = 'machine'; PrivilegesRequired = 'admin'; StartMenu = 'automatic'
     TimestampUtc = [DateTime]::UtcNow.ToString('o'); Signed = $false
 } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output "build-info.json")
-Write-Host "Built per-user installer: $installer"
+Write-Host "Built administrator-required installer: $installer"

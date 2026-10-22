@@ -1,144 +1,83 @@
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
-using System.Runtime.CompilerServices;
 using Newtonsoft.Json;
-using System.Windows;
 
-namespace AlpWareStudio.Localay
+namespace AlpWareStudio.Localay;
+
+public class LocalizationManager : INotifyPropertyChanged
 {
-    public class LocalizationManager : INotifyPropertyChanged
+    private static LocalizationManager? _instance;
+    public static LocalizationManager Instance => _instance ??= new LocalizationManager();
+
+    private readonly string _languageDirectory;
+    private readonly Dictionary<string, string> _defaultStrings;
+    private Dictionary<string, string> _strings;
+    private string _currentLanguage = "en";
+
+    public string CurrentLanguage
     {
-        // Singleton instance
-        private static LocalizationManager? _instance;
-        public static LocalizationManager Instance => _instance ??= new LocalizationManager();
+        get => _currentLanguage;
+        set { if (_currentLanguage != value) LoadLanguage(value); }
+    }
 
-        private Dictionary<string, string> _strings;
+    public string this[string key] =>
+        _strings.TryGetValue(key, out var value) ? value : $"[{key}]";
 
-        private Dictionary<string, string> _defaultStrings;
+    public LocalizationManager Strings => this;
 
-        private string _currentLanguage = "en";
+    private LocalizationManager() : this(Path.Combine(AppContext.BaseDirectory, "Languages")) { }
 
-        public string CurrentLanguage
+    // Language loading can be checked with isolated resource files without a WPF host.
+    internal LocalizationManager(string languageDirectory)
+    {
+        _languageDirectory = languageDirectory;
+        _defaultStrings = ReadLanguage("en") ?? new Dictionary<string, string>();
+        _strings = new Dictionary<string, string>(_defaultStrings);
+    }
+
+    private Dictionary<string, string>? ReadLanguage(string code)
+    {
+        try
         {
-            get => _currentLanguage;
-            set
-            {
-                if (_currentLanguage != value)
-                {
-                    _currentLanguage = value;
-                    LoadLanguage(_currentLanguage);
-                    OnPropertyChanged();
-                    // Notify that all properties "Strings" have changed
-                    OnPropertyChanged(nameof(Strings));
-                }
-            }
+            string path = Path.Combine(_languageDirectory, code + ".json");
+            if (!File.Exists(path)) return null;
+            var loaded = JsonConvert.DeserializeObject<Dictionary<string, string>>(File.ReadAllText(path));
+            return loaded?.Where(item => !string.IsNullOrWhiteSpace(item.Value))
+                .ToDictionary(item => item.Key, item => item.Value);
         }
-
-        public string this[string key]
+        catch (Exception exception)
         {
-            get
-            {
-                if (_strings != null && _strings.TryGetValue(key, out string? value))
-                {
-                    return value ?? $"[{key}]";
-                }
-
-                // Fallback to English if not found in the current language
-                if (_defaultStrings != null && _defaultStrings.TryGetValue(key, out string? defaultValue))
-                {
-                    return defaultValue ?? $"[{key}]";
-                }
-
-                return $"[{key}]"; // Return key if not found in any language
-            }
+            Console.Error.WriteLine($"Error loading language {code}: {exception.GetType().Name}");
+            return null;
         }
+    }
 
-        public LocalizationManager Strings => this;
+    public void LoadLanguage(string langCode)
+    {
+        string code = PreferenceRules.NormalizeLanguagePreference(langCode);
+        if (code == PreferenceRules.System) code = "en";
+        var loaded = ReadLanguage(code);
+        var next = new Dictionary<string, string>(_defaultStrings);
+        if (loaded != null)
+            foreach (var item in loaded) next[item.Key] = item.Value;
 
-        private LocalizationManager()
+        // Commit a complete dictionary and its effective language before notifying bindings.
+        _strings = next;
+        _currentLanguage = loaded != null ? code : "en";
+        OnPropertyChanged(nameof(CurrentLanguage));
+        OnPropertyChanged(nameof(Strings));
+        OnPropertyChanged("Item[]");
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    protected virtual void OnPropertyChanged(string propertyName)
+    {
+        if (PropertyChanged == null) return;
+        foreach (PropertyChangedEventHandler observer in PropertyChanged.GetInvocationList())
         {
-            _strings = new Dictionary<string, string>();
-            _defaultStrings = new Dictionary<string, string>();
-
-            LoadDefaultLanguage();
-            LoadLanguage("en");
-        }
-
-        private void LoadDefaultLanguage()
-        {
-            try
-            {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Languages", "en.json");
-                if (File.Exists(path))
-                {
-                    string json = File.ReadAllText(path);
-                    var loadedStrings = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-                    if (loadedStrings != null)
-                    {
-                        _defaultStrings = loadedStrings;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine($"Error loading default language: {ex.Message}");
-            }
-        }
-
-        public void LoadLanguage(string langCode)
-        {
-            try
-            {
-                string path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Languages", $"{langCode}.json");
-                if (File.Exists(path))
-                {
-                    string json = File.ReadAllText(path);
-                    var newStrings = JsonConvert.DeserializeObject<Dictionary<string, string>>(json);
-
-                    if (newStrings != null)
-                    {
-                        // Merge with default strings to ensure no missing keys
-                        if (_defaultStrings != null)
-                        {
-                            foreach (var kvp in _defaultStrings)
-                            {
-                                if (!newStrings.ContainsKey(kvp.Key))
-                                {
-                                    newStrings[kvp.Key] = kvp.Value;
-                                }
-                            }
-                        }
-
-                        _strings = newStrings;
-                    }
-                }
-                else
-                {
-                    // If language file is not found, use default
-                    _strings = new Dictionary<string, string>(_defaultStrings);
-                }
-
-                // Update UI
-                OnPropertyChanged(nameof(Strings));
-                // Call PropertyChanged for null or empty string to refresh all bindings
-                OnPropertyChanged(string.Empty);
-            }
-            catch (Exception ex)
-            {
-                _strings = new Dictionary<string, string>(_defaultStrings);
-                Console.Error.WriteLine($"Error loading language {langCode}: {ex.Message}");
-                OnPropertyChanged(nameof(Strings));
-                OnPropertyChanged(string.Empty);
-            }
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)
-        {
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+            try { observer(this, new PropertyChangedEventArgs(propertyName)); }
+            catch (Exception exception) { App.WriteCrashLog("Localization observer", exception); }
         }
     }
 }

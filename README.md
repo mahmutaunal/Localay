@@ -95,7 +95,9 @@ Localay is currently distributed without code signing. Windows SmartScreen, Smar
 
 ### Updates
 
-Localay does not automatically download or replace executables. Close the app and run the newer installer to update it while preserving settings. For portable installations, extract the new package into a clean folder.
+Localay checks GitHub for a newer stable version in the background at most once a day. You can disable automatic checks in Settings → Help, or choose **Check for updates** there or in About. Downloads start only when you choose **Download update**. After the full installer passes size and SHA-256 checks, choose **Close and install**. Resolve any pending Settings edits; Localay then closes and opens the normal administrator-required setup, preserving saved settings and profiles. Setup offers to reopen Localay after installation.
+
+Portable copies show update notifications but use **Official releases** for manual updates; extract the complete new portable package into a clean folder. See [UPDATES.md](UPDATES.md) for the manual release checklist and verification limits.
 
 ## Build from source
 

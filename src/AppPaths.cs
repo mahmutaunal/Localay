@@ -31,7 +31,7 @@ internal static class AppPaths
             bool mainConfig = name == "config.txt";
             WriteAtomic(target, ConfigFileSecurity.RewriteSecrets(text, mainConfig));
             // The new copy is committed first. Best-effort removal of plaintext keys in the old file.
-            string sanitized = ConfigFileSecurity.RewriteSecrets(text, false);
+            string sanitized = ConfigFileSecurity.RewriteSecrets(text, false, preserveInterfacePreferences: true);
             if (sanitized != text)
             {
                 try { WriteAtomic(original, sanitized); }

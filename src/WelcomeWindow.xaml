@@ -51,7 +51,7 @@
 
         <Style x:Key="AccentButton" TargetType="Button" BasedOn="{StaticResource BaseButton}">
             <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
-            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
         </Style>
 
         <Style x:Key="PairButton" TargetType="Button" BasedOn="{StaticResource NeutralButton}">

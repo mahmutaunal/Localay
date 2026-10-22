@@ -72,7 +72,7 @@ public partial class App : Application
         // Without this, the app silently exits on systems where WinRT components are missing.
         try
         {
-            if (AppRestart.RunHelper(e.Args) is int helperExitCode)
+            if ((UpdateInstaller.RunHelper(e.Args) ?? AppRestart.RunHelper(e.Args)) is int helperExitCode)
             {
                 Shutdown(helperExitCode);
                 return;
@@ -215,6 +215,7 @@ public partial class App : Application
 
     protected override void OnExit(ExitEventArgs e)
     {
+        UpdateCoordinator.Stop();
         ApplicationPreferences.Stop();
         base.OnExit(e);
 

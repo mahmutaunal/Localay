@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NuGetAudit>true</NuGetAudit><NuGetAuditMode>all</NuGetAuditMode>
+    <WarningsAsErrors>NU1900;NU1901;NU1902;NU1903;NU1904;NU1905</WarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/ServicePreferenceDraft.cs" Link="ServicePreferenceDraft.cs" />
+    <Compile Include="../../src/SectionPreferenceDraft.cs" Link="SectionPreferenceDraft.cs" />
+    <Compile Include="../../src/ProfileDocument.cs" Link="ProfileDocument.cs" />
+    <Compile Include="../../src/ResultPreferenceDraft.cs" Link="ResultPreferenceDraft.cs" />
+    <Compile Include="../../src/CapturePreferenceDraft.cs" Link="CapturePreferenceDraft.cs" />
+    <Compile Include="../../src/GeneralPreferenceDraft.cs" Link="GeneralPreferenceDraft.cs" />
+    <Compile Include="../../src/PreferenceCommit.cs" Link="PreferenceCommit.cs" />
+    <Compile Include="../../src/PreferenceRules.cs" Link="PreferenceRules.cs" />
+    <Compile Include="../../src/LocalizationManager.cs" Link="LocalizationManager.cs" />
+    <Compile Include="../../src/AppPaths.cs" Link="AppPaths.cs" />
+    <Compile Include="../../src/ConfigFileSecurity.cs" Link="ConfigFileSecurity.cs" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+  </ItemGroup>
+</Project>

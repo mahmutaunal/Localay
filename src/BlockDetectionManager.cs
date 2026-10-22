@@ -1814,6 +1814,12 @@ namespace AlpWareStudio.Localay
         /// <param name="scale">Scale factor (1.0 is default, higher values for larger text/images)</param>
         private const double DEFAULT_BLOCK_SCALE = 1.0;
 
+        // Saved preference refresh without a second config write or singleton construction.
+        internal static void RefreshSavedPreferencesIfCreated()
+        {
+            if (_instance != null) _instance._scaleModToApplyToAllBlockDetectionParameters = ConfigManager.Instance.GetBlockDetectionScale();
+        }
+
         public void SetBlockDetectionScale(double scale)
         {
             if (scale <= 0)

@@ -13,6 +13,10 @@ namespace AlpWareStudio.Localay
         private static WindowsOCRManager? _instance;
         private bool _windowsOcrUnavailable;
         private string? _lastWindowsOcrFailureSignature;
+        private readonly object _engineGate = new();
+        private readonly SemaphoreSlim _recognitionGate = new(1, 1);
+        private readonly SingleResourceCache<string, OcrEngine> _engines = new(_ => { });
+        private byte[] _pixelBytes = Array.Empty<byte>();
 
         public string? _currentLanguageCode = null;
 
@@ -40,34 +44,29 @@ namespace AlpWareStudio.Localay
         }
 
         // Convert a System.Drawing.Bitmap to a Windows.Graphics.Imaging.SoftwareBitmap
-        public async Task<SoftwareBitmap> ConvertBitmapToSoftwareBitmapAsync(System.Drawing.Bitmap bitmap)
+        private SoftwareBitmap ConvertBitmapToSoftwareBitmap(System.Drawing.Bitmap bitmap)
         {
+            // Keep the existing contrast/brightness preprocessing. Avoid BMP encoding,
+            // a stream and BitmapDecoder just to move the same BGRA pixels to WinRT.
+            using var enhanced = OptimizeImageForOcr(bitmap);
+            int rowBytes = checked(enhanced.Width * 4);
+            int length = checked(rowBytes * enhanced.Height);
+            if (_pixelBytes.Length != length) _pixelBytes = new byte[length];
+            var pixels = enhanced.LockBits(new System.Drawing.Rectangle(0, 0, enhanced.Width, enhanced.Height),
+                System.Drawing.Imaging.ImageLockMode.ReadOnly, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
             try
             {
-                // Convert the bitmap to a SoftwareBitmap
-                using (var enhancedBitmap = OptimizeImageForOcr(bitmap))
-                {
-                    using (MemoryStream memoryStream = new MemoryStream())
-                    {
-                        // Using BMP because it's faster and doesn't require compression/decompression
-                        enhancedBitmap.Save(memoryStream, System.Drawing.Imaging.ImageFormat.Bmp);
-                        memoryStream.Position = 0;
-                        
-                        using (var randomAccessStream = memoryStream.AsRandomAccessStream())
-                        {
-                            var decoder = await BitmapDecoder.CreateAsync(randomAccessStream);
-                            return await decoder.GetSoftwareBitmapAsync(
-                                BitmapPixelFormat.Bgra8,
-                                BitmapAlphaMode.Premultiplied);
-                        }
-                    }
-                }
+                for (int y = 0; y < enhanced.Height; y++)
+                    System.Runtime.InteropServices.Marshal.Copy(pixels.Scan0 + y * pixels.Stride, _pixelBytes, y * rowBytes, rowBytes);
             }
-            catch (Exception ex)
+            finally { enhanced.UnlockBits(pixels); }
+            var result = new SoftwareBitmap(BitmapPixelFormat.Bgra8, enhanced.Width, enhanced.Height, BitmapAlphaMode.Premultiplied);
+            try
             {
-                Console.WriteLine($"Error converting bitmap to SoftwareBitmap: {ex.Message}");
-                throw; // Rethrow to be handled by caller
+                result.CopyFromBuffer(Windows.Security.Cryptography.CryptographicBuffer.CreateFromByteArray(_pixelBytes));
+                return result;
             }
+            catch { result.Dispose(); throw; }
         }
 
         // Optimize the image for OCR
@@ -314,23 +313,32 @@ namespace AlpWareStudio.Localay
 
         private OcrEngine? TryCreateOcrEngine(string languageCode)
         {
-            var status = GetLanguageStatus(languageCode);
-            if (!status.IsReady || status.RecognizerTag == null) return null;
-            try
+            lock (_engineGate)
             {
-                var engine = OcrEngine.TryCreateFromLanguage(new Language(status.RecognizerTag));
-                if (engine != null) _windowsOcrUnavailable = false;
-                return engine;
-            }
-            catch (Exception ex)
-            {
-                HandleWindowsOcrActivationFailure($"creating an OCR engine for language {status.RecognizerTag}", ex);
-                return null;
+                try
+                {
+                    return _engines.GetOrCreate(languageCode.ToLowerInvariant(), () =>
+                    {
+                        var status = GetLanguageStatus(languageCode);
+                        if (!status.IsReady || status.RecognizerTag == null)
+                            throw new InvalidOperationException("The requested OCR language is not ready.");
+                        var engine = OcrEngine.TryCreateFromLanguage(new Language(status.RecognizerTag));
+                        if (engine == null) throw new InvalidOperationException("Windows did not create an OCR engine.");
+                        _windowsOcrUnavailable = false;
+                        return engine;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    HandleWindowsOcrActivationFailure($"creating an OCR engine for language {languageCode}", ex);
+                    return null;
+                }
             }
         }
 
         private void HandleWindowsOcrActivationFailure(string operation, Exception ex)
         {
+            lock (_engineGate) _engines.Clear();
             _windowsOcrUnavailable = true;
             _currentLanguageCode = null;
 
@@ -367,39 +375,31 @@ namespace AlpWareStudio.Localay
         // Get OCR lines directly from a bitmap
         public async Task<List<Windows.Media.Ocr.OcrLine>> GetOcrLinesFromBitmapAsync(System.Drawing.Bitmap bitmap, string languageCode = "en")
         {
+            await _recognitionGate.WaitAsync().ConfigureAwait(false);
             try
             {
-                // Convert the bitmap to a SoftwareBitmap
-                SoftwareBitmap softwareBitmap = await ConvertBitmapToSoftwareBitmapAsync(bitmap);
-                
-                // Get the OCR engine
-                OcrEngine? ocrEngine = TryCreateOcrEngine(languageCode);
-                if (ocrEngine == null)
+                var engine = TryCreateOcrEngine(languageCode);
+                if (engine == null)
                 {
-                    if (!_windowsOcrUnavailable)
-                    {
-                        Console.WriteLine("Windows OCR engine is not available. Returning an empty OCR result.");
-                    }
-
+                    PipelineDiagnostics.Current?.Finish(PipelineOutcome.Failed);
                     return new List<Windows.Media.Ocr.OcrLine>();
                 }
-                
-                // Perform OCR
-                var result = await ocrEngine.RecognizeAsync(softwareBitmap);
-                
-                // Return the lines directly
+                using var softwareBitmap = ConvertBitmapToSoftwareBitmap(bitmap);
+                var result = await engine.RecognizeAsync(softwareBitmap);
                 return result.Lines.ToList();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Windows OCR error: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                lock (_engineGate) _engines.Clear();
+                PipelineDiagnostics.Current?.Finish(PipelineOutcome.Failed);
+                Console.WriteLine($"Windows OCR error: {ex.GetType().Name}");
                 return new List<Windows.Media.Ocr.OcrLine>();
             }
+            finally { _recognitionGate.Release(); }
         }
 
         // Process Windows OCR results
-        public Task ProcessWindowsOcrResults(List<Windows.Media.Ocr.OcrLine> textLines, string languageCode = "en")
+        public Task ProcessWindowsOcrResults(List<Windows.Media.Ocr.OcrLine> textLines, string languageCode = "en", Func<bool>? canProcess = null, Action<string>? receiveResults = null)
         {
             try
             {
@@ -568,7 +568,6 @@ namespace AlpWareStudio.Localay
                 {
                     status = "success",
                     results = results,
-                    processing_time_seconds = 0.1,
                     char_level = useCharacterLevel // Indicate this is character-level data
                 };
 
@@ -583,8 +582,14 @@ namespace AlpWareStudio.Localay
                 //Console.WriteLine($"Generated Windows OCR JSON response with {results.Count} results");
 
                 // Process the JSON response on the UI thread to handle STA requirements
+                var timing = PipelineDiagnostics.Current;
+                using var queueTiming = timing?.Measure(PipelineWork.DispatcherQueue);
                 Application.Current.Dispatcher.Invoke((Action)(() => {
-                    Logic.Instance.ProcessReceivedTextJsonData(jsonResponse);
+                    queueTiming?.Dispose();
+                    using var timingScope = PipelineDiagnostics.Use(timing);
+                    if (canProcess != null && !canProcess()) return;
+                    if (receiveResults != null) receiveResults(jsonResponse);
+                    else Logic.Instance.ProcessReceivedTextJsonData(jsonResponse);
                 }));
             }
             catch (Exception ex)

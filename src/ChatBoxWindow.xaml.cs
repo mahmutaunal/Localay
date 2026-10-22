@@ -101,6 +101,9 @@ namespace AlpWareStudio.Localay
         {
             Instance = this;
             InitializeComponent();
+            IsVisibleChanged += (_, _) => MainWindow.NotifyResultSurfaceChanged();
+            StateChanged += (_, _) => MainWindow.NotifyResultSurfaceChanged();
+            Closed += (_, _) => MainWindow.NotifyResultSurfaceChanged();
 
             // Register application-wide keyboard shortcut handler
             this.PreviewKeyDown += Application_KeyDown;
@@ -328,17 +331,7 @@ namespace AlpWareStudio.Localay
                     // - At 0%, stays 0%
                     // - At 50%, is more like true 50%
                     // - At 100%, is actually 100%
-                    double scaledOpacity;
-                    if (bgOpacity >= 0.95)
-                    {
-                        // Ensure full opacity when set to maximum
-                        scaledOpacity = 1.0;
-                    }
-                    else
-                    {
-                        // Use a blend of linear and square-root for intermediate values
-                        scaledOpacity = 0.7 * Math.Sqrt(bgOpacity) + 0.3 * bgOpacity;
-                    }
+                    double scaledOpacity = ResultPreferenceDraft.ChatBackgroundOpacity(bgOpacity);
 
                     // Set main window background
                     Color bgColorWithOpacity = Color.FromArgb(
@@ -415,27 +408,7 @@ namespace AlpWareStudio.Localay
         {
             try
             {
-                // Create options window
-                var optionsWindow = new ChatBoxOptionsWindow();
-
-                // Set the owner to ensure it appears on top of this window
-                optionsWindow.Owner = this;
-
-                // Make this window appear in front
-                this.Topmost = false;
-                this.Topmost = true;
-
-                // Show the dialog
-                var result = optionsWindow.ShowDialog();
-
-                // If user clicked OK, styling will already be applied by the options window
-                if (result == true)
-                {
-                    Console.WriteLine("Chat box options updated");
-
-                    // Create and start the flash animation for visual feedback
-                    CreateFlashAnimation(optionsButton);
-                }
+                SettingsWindow.Instance.ShowResultFor(MainWindow.Instance);
             }
             catch (Exception ex)
             {
@@ -1222,15 +1195,7 @@ namespace AlpWareStudio.Localay
                 else
                 {
                     // Calculate opacity value with our scaling formula
-                    double scaledOpacity;
-                    if (bgOpacity >= 0.95)
-                    {
-                        scaledOpacity = 1.0;
-                    }
-                    else
-                    {
-                        scaledOpacity = 0.7 * Math.Sqrt(bgOpacity) + 0.3 * bgOpacity;
-                    }
+                    double scaledOpacity = ResultPreferenceDraft.ChatBackgroundOpacity(bgOpacity);
 
                     // Apply the background color to the ScrollViewer instead of RichTextBox
                     chatScrollViewer.Background = new SolidColorBrush(Color.FromArgb(

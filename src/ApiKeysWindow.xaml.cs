@@ -10,12 +10,16 @@ namespace AlpWareStudio.Localay
     {
         private ObservableCollection<string> _apiKeys = new ObservableCollection<string>();
         private string _serviceType;
+        private readonly Action<List<string>>? _updateDraft;
+        private readonly List<string> _actualKeys;
         
-        public ApiKeysWindow(string serviceType, List<string> apiKeys)
+        public ApiKeysWindow(string serviceType, List<string> apiKeys, Action<List<string>>? updateDraft = null)
         {
             InitializeComponent();
             
             _serviceType = serviceType;
+            _updateDraft = updateDraft;
+            _actualKeys = apiKeys.Where(key => !string.IsNullOrEmpty(key)).ToList();
             UiText.Bind(this, Window.TitleProperty, "ApiKeys_ServiceTitle", _serviceType);
             
             // Populate the list with existing keys
@@ -38,7 +42,7 @@ namespace AlpWareStudio.Localay
         {
             if (string.IsNullOrEmpty(apiKey) || apiKey.Length <= 8)
             {
-                return apiKey;
+                return new string('•', apiKey?.Length ?? 0);
             }
             
             return apiKey.Substring(0, 4) + "..." + apiKey.Substring(apiKey.Length - 4);
@@ -63,12 +67,8 @@ namespace AlpWareStudio.Localay
                     _apiKeys.RemoveAt(selectedIndex);
                     
                     // Save the updated list
-                    List<string> actualKeys = ConfigManager.Instance.GetApiKeysList(_serviceType);
-                    if (selectedIndex < actualKeys.Count)
-                    {
-                        actualKeys.RemoveAt(selectedIndex);
-                        ConfigManager.Instance.SaveApiKeysList(_serviceType, actualKeys);
-                    }
+                    if (selectedIndex < _actualKeys.Count) _actualKeys.RemoveAt(selectedIndex);
+                    PublishKeys();
                 }
             }
         }
@@ -90,11 +90,18 @@ namespace AlpWareStudio.Localay
                     _apiKeys.Clear();
                     
                     // Save the empty list
-                    ConfigManager.Instance.SaveApiKeysList(_serviceType, new List<string>());
+                    _actualKeys.Clear();
+                    PublishKeys();
                 }
             }
         }
         
+        private void PublishKeys()
+        {
+            if (_updateDraft != null) _updateDraft(new List<string>(_actualKeys));
+            else ConfigManager.Instance.SaveApiKeysList(_serviceType, new List<string>(_actualKeys));
+        }
+
         // Close button
         private void CloseButton_Click(object sender, RoutedEventArgs e)
         {

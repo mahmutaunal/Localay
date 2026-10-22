@@ -32,27 +32,12 @@
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
-                    <Setter Property="Foreground" Value="White"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
                 </Trigger>
             </Style.Triggers>
         </Style>
 
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource Surface3Brush}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="Padding" Value="10,4"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource Surface2Brush}"/>
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
+        <Style TargetType="Button" BasedOn="{StaticResource LocalayButton}"/>
     </Window.Resources>
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -71,7 +56,9 @@
                        TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{DynamicResource WarningBrush}" Visibility="Collapsed"/>
         </StackPanel>
         
-        <ListView Grid.Row="2" Name="windowListView" Margin="0,5" MouseDoubleClick="windowListView_MouseDoubleClick"
+        <Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+        <StackPanel><Label Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_SearchWindows]}" Target="{Binding ElementName=windowSearchBox}"/><TextBox x:Name="windowSearchBox" MinHeight="40" Margin="0,0,0,8" TextChanged="WindowSearch_Changed"/></StackPanel>
+        <ListView Grid.Row="1" Name="windowListView" SelectionChanged="WindowSelection_Changed" Margin="0,5" MouseDoubleClick="windowListView_MouseDoubleClick"
                   Background="{DynamicResource Surface2Brush}"
                   Foreground="{DynamicResource TextBrush}"
                   BorderBrush="{DynamicResource BorderBrush}">
@@ -81,11 +68,12 @@
                 </GridView>
             </ListView.View>
         </ListView>
-        
+        <TextBlock x:Name="emptyWindowListText" Grid.Row="2" Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_NoWindows]}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8" Visibility="Collapsed"/>
+        </Grid>
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5,0,0">
-            <Button Name="refreshButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Refresh]}" Width="80" Margin="0,0,5,0" Click="RefreshButton_Click"/>
-            <Button Name="selectButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Select]}" Width="80" Margin="0,0,5,0" Click="SelectButton_Click"/>
-            <Button Name="cancelButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Cancel]}" Width="80" Click="CancelButton_Click"/>
+            <Button Name="refreshButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Refresh]}" MinWidth="80" Margin="0,0,5,0" Click="RefreshButton_Click"/>
+            <Button Name="selectButton" IsEnabled="False" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Select]}" MinWidth="80" Margin="0,0,5,0" Click="SelectButton_Click"/>
+            <Button Name="cancelButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Common_Btn_Cancel]}" MinWidth="80" Click="CancelButton_Click"/>
         </StackPanel>
     </Grid>
 </Window>

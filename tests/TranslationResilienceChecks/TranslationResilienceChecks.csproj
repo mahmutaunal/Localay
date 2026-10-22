@@ -4,13 +4,19 @@
     <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><NuGetAudit>true</NuGetAudit>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../src/PipelineTiming.cs" Link="PipelineTiming.cs" />
     <Compile Include="../../src/TranslationFailure.cs" Link="TranslationFailure.cs" />
     <Compile Include="../../src/TranslationRetryState.cs" Link="TranslationRetryState.cs" />
+    <Compile Include="../../src/TranslationBlockProtocol.cs" Link="TranslationBlockProtocol.cs" />
+    <Compile Include="../../src/TranslationBatchCoordinator.cs" Link="TranslationBatchCoordinator.cs" />
     <Compile Include="../../src/TranslationParts.cs" Link="TranslationParts.cs" />
     <Compile Include="../../src/TranslationRequestContext.cs" Link="TranslationRequestContext.cs" />
     <Compile Include="../../src/ITranslationService.cs" Link="ITranslationService.cs" />
     <Compile Include="../../src/TranslationCache.cs" Link="TranslationCache.cs" />
     <Compile Include="../../src/GoogleTranslateFreeClient.cs" Link="GoogleTranslateFreeClient.cs" />
     <Compile Include="../../src/GoogleTranslateWebToken.cs" Link="GoogleTranslateWebToken.cs" />
+    <Compile Include="../../src/TranslateGemmaClient.cs" Link="TranslateGemmaClient.cs" />
+    <Compile Include="../../src/MarianTranslationService.cs" Link="MarianTranslationService.cs" />
+    <Compile Include="../../src/LocalModelDecision.cs" Link="LocalModelDecision.cs" />
   </ItemGroup>
 </Project>

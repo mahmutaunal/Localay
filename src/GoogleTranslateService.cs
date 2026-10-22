@@ -80,7 +80,11 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public async Task<string?> TranslateAsync(string jsonData, string prompt)
         {
-            bool canHedge = !_useCloudApi && IsFallbackServiceAvailable() && !_freeClient.IsCoolingDown;
+            using var input = JsonDocument.Parse(jsonData);
+            // Managed ID batches already share a bounded provider flight. Starting a
+            // speculative second provider would duplicate that work and outlive its slot.
+            bool canHedge = !TranslationBlockProtocol.IsEnabled(input.RootElement) &&
+                !_useCloudApi && IsFallbackServiceAvailable() && !_freeClient.IsCoolingDown;
             if (!canHedge)
                 return await TranslateWithGoogleAsync(jsonData, prompt, allowFallback: true, TranslationRequestContext.Cancellation);
 
@@ -217,7 +221,23 @@ namespace AlpWareStudio.Localay
                     attemptedCount = blocks.Count;
 
                     // All blocks share the batched requests, instead of at least one request per block
-                    var translations = await TranslatePreservingSeparatorsAsync(
+                    List<(string Text, bool Success)> translations;
+                    if (TranslationBlockProtocol.IsEnabled(root))
+                    {
+                        // Each ID is one source block. Literal legacy separators stay
+                        // inside the text; they no longer define application ownership.
+                        var texts = blocks.Select(b => b.Text).ToArray();
+                        var values = _useCloudApi
+                            ? await TranslateBatchWithCloudApiAsync(texts, sourceLanguage, targetLanguage)
+                            : await TranslateFreePartsBatchedAsync(texts.ToList(), sourceLanguage, targetLanguage, freeBudget.Token, independentBlocks: true);
+                        if (values.Count != blocks.Count)
+                        {
+                            TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidResponse));
+                            return null;
+                        }
+                        translations = values.Select(v => (v ?? "", !string.IsNullOrWhiteSpace(v))).ToList();
+                    }
+                    else translations = await TranslatePreservingSeparatorsAsync(
                         blocks.Select(b => b.Text).ToList(), sourceLanguage, targetLanguage, freeBudget.Token);
 
                     for (int i = 0; i < blocks.Count; i++)
@@ -361,14 +381,16 @@ namespace AlpWareStudio.Localay
         /// Parts never contain newlines (NormalizeText). If Google returns a different number of
         /// lines, that group falls back to one request per part.
         /// </summary>
-        private async Task<List<string?>> TranslateFreePartsBatchedAsync(List<string> parts, string source, string target, CancellationToken cancellationToken)
+        private async Task<List<string?>> TranslateFreePartsBatchedAsync(List<string> parts, string source, string target, CancellationToken cancellationToken, bool independentBlocks = false)
         {
             var results = new List<string?>(new string?[parts.Count]);
             int start = 0;
             while (start < parts.Count && !cancellationToken.IsCancellationRequested)
             {
                 int end = start, chars = 0;
-                while (end < parts.Count && (end == start || chars + parts[end].Length + 1 <= MaxFreeBatchChars))
+                bool IsMultiline(string text) => text.Contains('\n') || text.Contains('\r');
+                while (end < parts.Count && (end == start || chars + parts[end].Length + 1 <= MaxFreeBatchChars) &&
+                    (end == start || !independentBlocks || (!IsMultiline(parts[start]) && !IsMultiline(parts[end]))))
                 {
                     chars += parts[end].Length + 1;
                     end++;
@@ -425,6 +447,7 @@ namespace AlpWareStudio.Localay
                 return null;
             try
             {
+                TranslationRequestContext.Cancellation.ThrowIfCancellationRequested();
                 Console.WriteLine($"{reason}, translating with {fallback} meanwhile");
                 ITranslationService service = TranslationServiceFactory.CreateService(fallback);
                 return await service.TranslateAsync(jsonData, prompt);
@@ -446,7 +469,8 @@ namespace AlpWareStudio.Localay
                 {
                     if (!block.TryGetProperty("text", out JsonElement text) || text.ValueKind != JsonValueKind.String)
                         continue;
-                    foreach (string part in (text.GetString() ?? "").Split(CombinedBlockSeparator))
+                    foreach (string part in TranslationBlockProtocol.IsEnabled(root)
+                        ? new[] { text.GetString() ?? "" } : (text.GetString() ?? "").Split(CombinedBlockSeparator))
                     {
                         if (!string.IsNullOrWhiteSpace(part) && ++parts >= MaxFreeTranslationDurationMs / MaxFreePartDurationMs)
                             return MaxFreeTranslationDurationMs;

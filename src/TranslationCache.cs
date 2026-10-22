@@ -53,6 +53,18 @@ namespace AlpWareStudio.Localay
             return false;
         }
 
+        // Compare context and read atomically; a late worker must never read a
+        // translation written after a language/model/context switch.
+        public bool TryGet(string context, string text, out string translation)
+        {
+            lock (_lock)
+            {
+                if (_context == context) return TryGet(text, out translation);
+                translation = "";
+                return false;
+            }
+        }
+
         public void Set(string text, string translation)
         {
             if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(translation))

@@ -22,6 +22,9 @@ namespace AlpWareStudio.Localay
         private bool _disposed;
         private bool _itemClosed;
         private Bitmap? _lastFrame;
+        private const int FramePoolCapacity = 2;
+        private readonly object _frameGate = new();
+        private readonly LatestCaptureFrame<Direct3D11CaptureFrame> _latestFrame = new();
 
         /// <summary>
         /// Check whether Windows Graphics Capture is available on this system.
@@ -44,95 +47,129 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public bool StartCapture(IntPtr hwnd)
         {
+            StopCapture();
             try
             {
-                StopCapture();
-
-                _d3dHelper = Direct3D11Helper.Create();
-
-                _captureItem = CreateCaptureItemForWindow(hwnd);
-                if (_captureItem == null)
-                    return false;
-
-                _captureItem.Closed += (item, _) =>
+                lock (_frameGate)
                 {
-                    _itemClosed = true;
-                    Console.WriteLine("GraphicsCaptureItem closed (target window gone)");
-                };
+                    if (_disposed) return false;
+                    _d3dHelper = Direct3D11Helper.Create();
+                    _captureItem = CreateCaptureItemForWindow(hwnd);
+                    if (_captureItem == null) throw new InvalidOperationException("No capture item was created.");
+                    _captureItem.Closed += OnCaptureItemClosed;
+                    _lastSize = _captureItem.Size;
 
-                _lastSize = _captureItem.Size;
-
-                // Free-threaded pool: FrameArrived fires on thread-pool (not used here,
-                // but avoids creating a DispatcherQueue dependency).
-                _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-                    _d3dHelper.WinRTDevice,
-                    DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                    2,
-                    _captureItem.Size);
-
-                _session = _framePool.CreateCaptureSession(_captureItem);
-
-                // Keep the Windows capture indicator visible.
-
-                // Exclude the mouse cursor from captured frames.
-                try { _session.IsCursorCaptureEnabled = false; } catch { }
-
-                _session.StartCapture();
-                Console.WriteLine("Windows Graphics Capture started successfully");
-                return true;
+                    // Native frame arrival replaces the one pending surface. Pixel readback
+                    // and OCR happen only when the consumer is ready, not for every event.
+                    _framePool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                        _d3dHelper.WinRTDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                        FramePoolCapacity, _captureItem.Size);
+                    _framePool.FrameArrived += OnFrameArrived;
+                    _session = _framePool.CreateCaptureSession(_captureItem);
+                    try { _session.IsCursorCaptureEnabled = false; } catch { }
+                    _session.StartCapture();
+                    Console.WriteLine("Windows Graphics Capture started successfully");
+                    return true;
+                }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to start Windows Graphics Capture: {ex.Message}");
+                // Native shutdown can wait for event callbacks: never hold their gate here.
                 StopCapture();
                 return false;
             }
+        }
+
+        private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
+        {
+            lock (_frameGate)
+            {
+                if (_disposed || _itemClosed || !ReferenceEquals(sender, _framePool)) return;
+                try { _latestFrame.Drain(sender.TryGetNextFrame, FramePoolCapacity); }
+                catch (Exception ex) { Console.WriteLine($"WGC frame arrival failed: {ex.GetType().Name}"); }
+            }
+        }
+
+        private void OnCaptureItemClosed(GraphicsCaptureItem sender, object args)
+        {
+            Direct3D11CaptureFrame? pending;
+            Bitmap? cached;
+            lock (_frameGate)
+            {
+                if (!ReferenceEquals(sender, _captureItem)) return;
+                _itemClosed = true;
+                pending = _latestFrame.Take();
+                cached = _lastFrame;
+                _lastFrame = null;
+            }
+            try { pending?.Dispose(); } catch { }
+            try { cached?.Dispose(); } catch { }
         }
 
         /// <summary>
         /// Grab the latest frame synchronously.
         /// Returns null when no frame is available or the target window is gone.
         /// </summary>
-        public Bitmap? CaptureFrame()
+        public Bitmap? CaptureFrame(bool allowCachedFrame = true)
         {
-            if (_disposed || _itemClosed || _framePool == null || _d3dHelper == null)
-                return null;
-
-            try
+            lock (_frameGate)
             {
-                using var frame = _framePool.TryGetNextFrame();
-                if (frame == null)
+                if (_disposed || _itemClosed || _framePool == null || _d3dHelper == null)
+                    return null;
+
+                try
                 {
-                    // No new frame since last call — return a copy of the last captured frame.
-                    if (_lastFrame != null)
-                        return (Bitmap)_lastFrame.Clone();
+                    // Also drain here in case the UI runs before an already queued event callback.
+                    _latestFrame.Drain(_framePool.TryGetNextFrame, FramePoolCapacity);
+                    var frame = _latestFrame.Take();
+                    if (frame == null)
+                    {
+                        // No new frame since last call — return a copy of the last captured frame.
+                        if (allowCachedFrame && _lastFrame != null)
+                            return (Bitmap)_lastFrame.Clone();
+                        return null;
+                    }
+
+                    SizeInt32 contentSize;
+                    Bitmap bitmap;
+                    try
+                    {
+                        contentSize = frame.ContentSize;
+                        if (contentSize.Width <= 0 || contentSize.Height <= 0) return null;
+                        bitmap = _d3dHelper.SurfaceToBitmap(frame.Surface, contentSize.Width, contentSize.Height);
+                    }
+                    finally { frame.Dispose(); }
+
+                    // Release the acquired frame before recreating its pool.
+                    if (contentSize.Width != _lastSize.Width || contentSize.Height != _lastSize.Height)
+                    {
+                        _latestFrame.Clear();
+                        try
+                        {
+                            _framePool.Recreate(_d3dHelper.WinRTDevice,
+                                DirectXPixelFormat.B8G8R8A8UIntNormalized, FramePoolCapacity, contentSize);
+                            _lastSize = contentSize;
+                        }
+                        catch { bitmap.Dispose(); throw; }
+                    }
+
+                    // Cache the latest frame for reuse when TryGetNextFrame returns null.
+                    Bitmap cached;
+                    try { cached = (Bitmap)bitmap.Clone(); }
+                    catch { bitmap.Dispose(); throw; }
+                    _lastFrame?.Dispose();
+                    _lastFrame = cached;
+                    return bitmap;
+                }
+                catch (Exception ex)
+                {
+                    PipelineDiagnostics.Current?.Finish(PipelineOutcome.Failed);
+                    _lastFrame?.Dispose();
+                    _lastFrame = null;
+                    Console.WriteLine($"WGC CaptureFrame error: {ex.Message}");
                     return null;
                 }
-
-                // React to window resizes.
-                var contentSize = frame.ContentSize;
-                if (contentSize.Width != _lastSize.Width || contentSize.Height != _lastSize.Height)
-                {
-                    _lastSize = contentSize;
-                    _framePool.Recreate(
-                        _d3dHelper.WinRTDevice,
-                        DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                        2,
-                        contentSize);
-                }
-
-                var bitmap = _d3dHelper.SurfaceToBitmap(frame.Surface, contentSize.Width, contentSize.Height);
-
-                // Cache the latest frame for reuse when TryGetNextFrame returns null.
-                _lastFrame?.Dispose();
-                _lastFrame = (Bitmap)bitmap.Clone();
-
-                return bitmap;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"WGC CaptureFrame error: {ex.Message}");
-                return null;
             }
         }
 
@@ -141,30 +178,47 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public void StopCapture()
         {
-            _itemClosed = false;
+            GraphicsCaptureSession? session;
+            Direct3D11CaptureFramePool? pool;
+            Direct3D11Helper? helper;
+            Bitmap? cached;
+            Direct3D11CaptureFrame? pending;
+            lock (_frameGate)
+            {
+                session = _session;
+                pool = _framePool;
+                helper = _d3dHelper;
+                cached = _lastFrame;
+                pending = _latestFrame.Take();
+                try { if (pool != null) pool.FrameArrived -= OnFrameArrived; } catch { }
+                try { if (_captureItem != null) _captureItem.Closed -= OnCaptureItemClosed; } catch { }
+                _session = null;
+                _framePool = null;
+                _captureItem = null;
+                _d3dHelper = null;
+                _lastFrame = null;
+                _itemClosed = false;
+            }
 
-            try { _session?.Dispose(); } catch { }
-            _session = null;
-
-            try { _framePool?.Dispose(); } catch { }
-            _framePool = null;
-
-            _captureItem = null;
-
-            try { _d3dHelper?.Dispose(); } catch { }
-            _d3dHelper = null;
-
-            _lastFrame?.Dispose();
-            _lastFrame = null;
-
+            // A queued callback can now observe the detached pool and return immediately.
+            // Closing the pool/session while holding _frameGate could deadlock that callback.
+            try { pending?.Dispose(); } catch { }
+            try { session?.Dispose(); } catch { }
+            try { pool?.Dispose(); } catch { }
+            try { helper?.Dispose(); } catch { }
+            try { cached?.Dispose(); } catch { }
             Console.WriteLine("Windows Graphics Capture stopped");
         }
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
+            lock (_frameGate)
+            {
+                if (_disposed) return;
+                _disposed = true;
+            }
             StopCapture();
+            _latestFrame.Dispose();
         }
 
         // ═════════ HWND → GraphicsCaptureItem interop ═════════

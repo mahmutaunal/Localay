@@ -201,6 +201,15 @@ namespace AlpWareStudio.Localay
                     }
                 }
 
+                if (TranslationBlockProtocol.IsEnabled(root))
+                {
+                    var blocks = TranslationBlockProtocol.ReadBlocks(root);
+                    var values = await TranslateBatchAsync(blocks.Select(b => b.Text).ToArray(), urlForSignature, privateKey);
+                    string? direct = TranslationBlockProtocol.DirectResponse(blocks, values);
+                    if (direct == null) TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidResponse));
+                    return direct;
+                }
+
                 // Prepare response JSON writer
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 using var memoryStream = new MemoryStream();

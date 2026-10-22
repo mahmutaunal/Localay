@@ -28,7 +28,7 @@ internal static class TranslationRequestContext
     }
 
     internal static async Task<string?> RunAsync(ITranslationService service, string json, string prompt,
-        CancellationToken cancellation, Action<TranslationFailure>? onFailure = null)
+        CancellationToken cancellation, Action<TranslationFailure>? onFailure = null, bool awaitProviderCompletion = false)
     {
         cancellation.ThrowIfCancellationRequested();
         var previous = Current.Value;
@@ -36,7 +36,8 @@ internal static class TranslationRequestContext
         Current.Value = state;
         try
         {
-            string? response = await service.TranslateAsync(json, prompt).WaitAsync(cancellation);
+            var pending = InvokeMeasuredAsync(service, json, prompt);
+            string? response = awaitProviderCompletion ? await pending : await pending.WaitAsync(cancellation);
             cancellation.ThrowIfCancellationRequested();
             if (state.Failure != null || string.IsNullOrWhiteSpace(response))
                 onFailure?.Invoke(state.Failure ?? new(TranslationFailureKind.InvalidResponse));
@@ -49,5 +50,13 @@ internal static class TranslationRequestContext
             return null;
         }
         finally { Current.Value = previous; }
+    }
+
+    private static async Task<string?> InvokeMeasuredAsync(ITranslationService service, string json, string prompt)
+    {
+        // The provider may ignore cancellation. Measure its actual lifetime, not only how
+        // long the foreground caller waited for it through WaitAsync.
+        using var timing = PipelineDiagnostics.Measure(PipelineWork.Provider);
+        return await service.TranslateAsync(json, prompt).ConfigureAwait(false);
     }
 }

@@ -66,16 +66,45 @@ internal static class ApplicationPreferences
         catch (InvalidOperationException) { Interlocked.Exchange(ref _refreshQueued, 0); }
     }
 
-    internal static void SetLanguagePreference(string value)
+    internal static bool SetLanguagePreference(string value)
     {
-        ConfigManager.Instance.SetLanguageInterface(value);
+        if (!ConfigManager.Instance.SetLanguageInterface(value))
+        {
+            NotifyChanged(); // Restore all selectors to the last committed choice.
+            return false;
+        }
         Refresh();
+        return true;
     }
 
-    internal static void SetThemePreference(string value)
+    internal static bool SetThemePreference(string value)
     {
-        ConfigManager.Instance.SetThemeMode(value);
+        if (!ConfigManager.Instance.SetThemeMode(value))
+        {
+            NotifyChanged();
+            return false;
+        }
         Refresh();
+        return true;
+    }
+
+    internal static bool SaveGeneralDraft(GeneralPreferenceValues expected,
+        GeneralPreferenceValues edited, out bool conflict)
+    {
+        if (!ConfigManager.Instance.TrySaveGeneralPreferences(expected, edited, out conflict)) return false;
+        MainWindow.ApplySavedClipboardPreferences();
+        Refresh(); // Apply and notify only after the combined replacement succeeds.
+        return true;
+    }
+
+    private static void NotifyChanged()
+    {
+        if (Changed == null) return;
+        foreach (EventHandler observer in Changed.GetInvocationList())
+        {
+            try { observer(null, EventArgs.Empty); }
+            catch (Exception exception) { App.WriteCrashLog("Application preference observer", exception); }
+        }
     }
 
     internal static void Refresh()
@@ -87,11 +116,11 @@ internal static class ApplicationPreferences
         string language = PreferenceRules.ResolveLanguage(LanguagePreference, _systemLanguages, InterfaceLanguageOptions.AvailableCodes);
         bool dark = PreferenceRules.ResolveDark(ThemePreference, _systemDark);
         var snapshot = (LanguagePreference, ThemePreference, language, dark);
-        if (_lastApplied == snapshot) return;
-        _lastApplied = snapshot;
+        if (_lastApplied == snapshot && EffectiveLanguage == language && ThemeManager.IsDark == dark) return;
         ThemeManager.ApplyTheme(dark);
         LocalizationManager.Instance.CurrentLanguage = language;
-        Changed?.Invoke(null, EventArgs.Empty);
+        _lastApplied = snapshot;
+        NotifyChanged();
     }
 
 }

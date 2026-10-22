@@ -131,6 +131,7 @@ namespace AlpWareStudio.Localay
 
         private void LocalizationManager_PropertyChanged(object? sender, PropertyChangedEventArgs e)
         {
+            if (e.PropertyName != nameof(LocalizationManager.Strings)) return;
             foreach (var combo in new[] { SourceLanguageComboBox, TargetLanguageComboBox })
                 foreach (var item in combo.Items.OfType<ComboBoxItem>())
                     item.Content = GetLanguageDisplayName((string)item.Tag);

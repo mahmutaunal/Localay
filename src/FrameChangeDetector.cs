@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
@@ -11,12 +11,12 @@ namespace AlpWareStudio.Localay
     /// </summary>
     public sealed class FrameChangeDetector
     {
-        // A channel has to move more than this to count as a change: dithering and colour shimmer stay
-        // below it, while a glyph stroke (even a full stop) is far above it
-        private const int ChannelTolerance = 24;
-
         private byte[] _ocrFrame = Array.Empty<byte>();
         private byte[] _frame = Array.Empty<byte>();
+        private byte[] _previous = Array.Empty<byte>();
+        private int _previousWidth, _previousHeight, _previousOriginX, _previousOriginY;
+        private bool _hasPrevious;
+        internal FrameChangeMap Changes { get; private set; } = FrameChangeMap.All(0, 0);
         private int _ocrWidth, _ocrHeight, _ocrOriginX, _ocrOriginY;
         private int _width, _height, _originX, _originY;
         private bool _hasOcrFrame;
@@ -31,29 +31,28 @@ namespace AlpWareStudio.Localay
             _hasFrame = TryCopyPixels(frame);
             _originX = originX;
             _originY = originY;
-            if (!_hasFrame || !_hasOcrFrame)
-                return false;
-
-            if (_width != _ocrWidth || _height != _ocrHeight || _originX != _ocrOriginX || _originY != _ocrOriginY)
-                return false;
-
-            int length = _width * _height * 4;
-            ReadOnlySpan<byte> current = _frame.AsSpan(0, length);
-            ReadOnlySpan<byte> ocr = _ocrFrame.AsSpan(0, length);
-            if (current.SequenceEqual(ocr))
-                return true;
-
-            // BGRA: compare the colour channels, alpha is always opaque on a screen capture
-            for (int i = 0; i < length; i += 4)
+            if (!_hasFrame)
             {
-                if (Math.Abs(current[i] - ocr[i]) > ChannelTolerance
-                    || Math.Abs(current[i + 1] - ocr[i + 1]) > ChannelTolerance
-                    || Math.Abs(current[i + 2] - ocr[i + 2]) > ChannelTolerance)
-                {
-                    return false;
-                }
+                Changes = FrameChangeMap.All(frame.Width, frame.Height);
+                _hasPrevious = false;
+                return false;
             }
-            return true;
+
+            int length = checked(_width * _height * 4);
+            Changes = !_hasPrevious || _width != _previousWidth || _height != _previousHeight ||
+                originX != _previousOriginX || originY != _previousOriginY
+                ? FrameChangeMap.All(_width, _height)
+                : FrameChangeMap.Compare(_frame.AsSpan(0, length), _previous.AsSpan(0, length), _width, _height);
+            bool sameAsOcr = _hasOcrFrame && _width == _ocrWidth && _height == _ocrHeight &&
+                _originX == _ocrOriginX && _originY == _ocrOriginY &&
+                !FrameChangeMap.Compare(_frame.AsSpan(0, length), _ocrFrame.AsSpan(0, length), _width, _height).HasChanges;
+            // Rotate the two observation buffers instead of copying a second full image
+            // at 30 Hz. The separate OCR baseline is copied only when OCR actually starts.
+            (_previous, _frame) = (_frame, _previous);
+            _previousWidth = _width; _previousHeight = _height;
+            _previousOriginX = originX; _previousOriginY = originY;
+            _hasPrevious = true;
+            return sameAsOcr;
         }
 
         /// <summary>The frame last passed to IsSameAsOcrFrame is being OCR'd: compare later frames with it.</summary>
@@ -65,7 +64,9 @@ namespace AlpWareStudio.Localay
                 return;
             }
 
-            (_ocrFrame, _frame) = (_frame, _ocrFrame);
+            int length = checked(_width * _height * 4);
+            if (_ocrFrame.Length < length) _ocrFrame = new byte[length];
+            Buffer.BlockCopy(_previous, 0, _ocrFrame, 0, length);
             _ocrWidth = _width;
             _ocrHeight = _height;
             _ocrOriginX = _originX;

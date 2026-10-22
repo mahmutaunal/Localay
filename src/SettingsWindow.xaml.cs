@@ -10,7 +10,6 @@ using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Documents;
 using System.Windows.Navigation;
-using System.Windows.Media.Animation;
 using System.Diagnostics;
 using System.Collections.ObjectModel;
 using ComboBox = System.Windows.Controls.ComboBox;
@@ -150,6 +149,9 @@ namespace AlpWareStudio.Localay
     public partial class SettingsWindow : Window
     {
         private static SettingsWindow? _instance;
+        private readonly bool _initializeRuntime;
+        private bool _allowClose;
+        private bool _hasBeenShown;
 
 
         public string profileName = "";
@@ -172,49 +174,132 @@ namespace AlpWareStudio.Localay
         // creating MainWindow/ConfigManager, or accessing the user's profiles.
         internal SettingsWindow(bool initializeRuntime)
         {
+            _initializeRuntime = initializeRuntime;
             // Make sure the initialization flag is set before anything else
             _isInitializing = true;
             Console.WriteLine("SettingsWindow constructor: Setting _isInitializing to true");
 
             InitializeComponent();
+            InitializeDesignNavigation();
+            InitializeResultEditor();
             var languageTemplate = (DataTemplate)FindResource("SettingsLanguageTemplate");
             foreach (var combo in new[] { sourceLanguageComboBox, targetLanguageComboBox })
                 foreach (var item in combo.Items.OfType<ComboBoxItem>()) item.ContentTemplate = languageTemplate;
             InitializeHotkeyRows();
+            InitializeServiceDraftEvents();
+            InitializeRemainingEditors();
             if (!initializeRuntime) return;
 
             InitializeGeneralPreferences();
             foreach (var item in ocrMethodComboBox.Items.OfType<ComboBoxItem>())
                 if (item.Content?.ToString() == "OneOCR") item.IsEnabled = NativeOcrAssets.IsAvailable;
-            LocalizationManager.Instance.PropertyChanged += (s, e) => MatchTypeOptions.ForEach(option => option.RefreshText());
-            // The list follows changes made anywhere: hotkey selection, profile load, Settings buttons
-            MainWindow.Instance.ExcludeRegionsChanged += (s, e) => LoadExcludeRegions();
-            LocalizationManager.Instance.PropertyChanged += (s, e) => LoadExcludeRegions();
+            LocalizationManager.Instance.PropertyChanged += LocalizationChanged;
+            MainWindow.Instance.ExcludeRegionsChanged += ExcludeRegionsChanged;
+            ApplicationPreferences.Changed += GeneralPreferencesChanged;
+            Loaded += SettingsWindow_Loaded;
+            IsVisibleChanged += SettingsVisibilityChanged;
+        }
 
-            // Add Loaded event handler to ensure controls are initialized
-            this.Loaded += SettingsWindow_Loaded;
-            IsVisibleChanged += (s, e) =>
-            {
-                if (IsVisible)
-                {
-                    RefreshGeneralPreferences();
-                    Dispatcher.BeginInvoke(() => DpiHelper.FitWindowToWorkArea(this), System.Windows.Threading.DispatcherPriority.Loaded);
-                }
-            };
-            ApplicationPreferences.Changed += (s, e) => { RefreshGeneralPreferences(); LoadAvailableScreens(); };
+        private void LocalizationChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != nameof(LocalizationManager.Strings)) return;
+            foreach (var row in _hotkeyRows) row.RefreshText();
+            UpdateHotkeyConflicts();
+            MatchTypeOptions.ForEach(option => option.RefreshText());
+            LoadExcludeRegions();
+            RenderGeneralDraft();
+            RenderCaptureDraft();
+            RenderResultDraft();
+            RenderRemainingDraft(true); RenderRemainingDraft(false);
+        }
 
-            // Set up closing behavior (hide instead of close)
-            this.Closing += (s, e) =>
+        private void ExcludeRegionsChanged(object? sender, EventArgs e) => LoadExcludeRegions();
+
+        private void GeneralPreferencesChanged(object? sender, EventArgs e)
+        {
+            RefreshGeneralPreferences();
+            bool wasInitializing = _isInitializing;
+            try
             {
-                e.Cancel = true;  // Cancel the close
-                // Moving focus commits text fields that save on LostFocus, including Escape/title-bar close.
+                _isInitializing = true;
+                LoadAvailableScreens();
+            }
+            finally { _isInitializing = wasInitializing; }
+        }
+
+        private void SettingsVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
+        {
+            MainWindow.Instance.UpdateSettingsButtonState(IsVisible);
+            if (IsVisible) RefreshGeneralPreferences();
+            else { StopHotkeyCapture(); CancelPendingProfile(); }
+        }
+
+        internal void ShowFor(Window owner)
+        {
+            try
+            {
+                if (!IsVisible) ReloadSetting();
+                Owner = owner.IsVisible && owner.WindowState != WindowState.Minimized ? owner : null;
+                if (!_hasBeenShown)
+                    WindowStartupLocation = Owner == null
+                        ? WindowStartupLocation.CenterScreen : WindowStartupLocation.CenterOwner;
+                if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+                Show();
+                DpiHelper.FitWindowToWorkArea(this);
+                Activate();
+                _hasBeenShown = true;
+            }
+            catch
+            {
+                Hide();
+                throw;
+            }
+        }
+
+        internal static void ReloadIfVisible()
+        {
+            if (_instance?.IsVisible == true) _instance.ReloadSetting();
+        }
+
+        internal static void CloseIfCreated() => _instance?.ClosePermanently();
+
+        internal void ClosePermanently()
+        {
+            if (_initializeRuntime && IsVisible) closeSettingsButton.Focus();
+            _pendingGeneralAction = null; // Application shutdown never applies an unsaved draft.
+            _pendingServiceAction = null;
+            _pendingCaptureAction = null;
+            _pendingResultAction = null;
+            _pendingSectionActions.Clear();
+            _pendingProfileAction = null;
+            _allowClose = true;
+            Close();
+        }
+
+        protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+        {
+            if (_initializeRuntime && !_allowClose)
+            {
+                e.Cancel = true;
+                // Commit fields saved on LostFocus before hiding the persistent window.
                 closeSettingsButton.Focus();
+                RequestDismiss();
+            }
+            base.OnClosing(e);
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            if (_initializeRuntime)
+            {
+                LocalizationManager.Instance.PropertyChanged -= LocalizationChanged;
+                MainWindow.Instance.ExcludeRegionsChanged -= ExcludeRegionsChanged;
+                ApplicationPreferences.Changed -= GeneralPreferencesChanged;
                 StopHotkeyCapture();
-                this.Hide();      // Just hide the window
-                MainWindow.Instance.settingsButton.SetResourceReference(System.Windows.Controls.Control.BackgroundProperty, "SurfaceBrush");
-                MainWindow.Instance.settingsButton.SetResourceReference(System.Windows.Controls.Control.BorderBrushProperty, "BorderBrush");
-                MainWindow.Instance.settingsButton.FontWeight = FontWeights.Normal;
-            };
+                _hotkeyStatusTimer?.Stop();
+            }
+            if (ReferenceEquals(_instance, this)) _instance = null;
+            base.OnClosed(e);
         }
 
         private bool _syncingGeneralPreferences;
@@ -232,31 +317,32 @@ namespace AlpWareStudio.Localay
         private void RefreshGeneralPreferences()
         {
             if (interfaceLanguageComboBox == null || appearanceComboBox == null) return;
-            _syncingGeneralPreferences = true;
-            try
-            {
-                InterfaceLanguageOptions.SelectPreference(interfaceLanguageComboBox, ApplicationPreferences.LanguagePreference);
-                SelectComboBoxItemByTag(appearanceComboBox, ApplicationPreferences.ThemePreference);
-            }
-            finally { _syncingGeneralPreferences = false; }
+            RefreshGeneralDraft();
         }
 
         private void InterfaceLanguagePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isInitializing || _syncingGeneralPreferences || SelectedTag(interfaceLanguageComboBox) is not string code) return;
-            ApplicationPreferences.SetLanguagePreference(code);
+            if (_isInitializing || _syncingGeneralPreferences || _generalDraft == null ||
+                SelectedTag(interfaceLanguageComboBox) is not string code) return;
+            _generalDraft.SetLanguage(code);
+            GeneralDraftEdited();
         }
 
         private void AppearancePreference_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isInitializing || _syncingGeneralPreferences || SelectedTag(appearanceComboBox) is not string theme) return;
-            MainWindow.Instance.ApplyThemePreference(theme);
+            if (_isInitializing || _syncingGeneralPreferences || _generalDraft == null ||
+                SelectedTag(appearanceComboBox) is not string theme) return;
+            _generalDraft.SetTheme(theme);
+            GeneralDraftEdited();
         }
 
         private void QuickStartFromSettings_Click(object sender, RoutedEventArgs e)
         {
-            Close(); // The existing closing handler hides this persistent window.
-            MainWindow.Instance.OpenQuickStart();
+            RequestSettingsDecision(() =>
+            {
+                Hide();
+                MainWindow.Instance.OpenQuickStart();
+            });
         }
 
         private void CloseSettings_Click(object sender, RoutedEventArgs e) => Close();
@@ -269,12 +355,6 @@ namespace AlpWareStudio.Localay
             ApplicationPreferences.Refresh();
             RefreshGeneralPreferences();
         }
-
-        // Show message for multi selection are
-        private bool isNeedShowMessage = false;
-
-        // Show message for Auto OCR
-        private bool isNeedShowWarningAutoOCR = false;
 
         // Flag to prevent saving during initialization
         private bool _isInitializing = true;
@@ -322,8 +402,7 @@ namespace AlpWareStudio.Localay
                 LoadSettingsFromMainWindow();
 
                 // Make sure service-specific settings are properly initialized
-                string currentService = ConfigManager.Instance.GetCurrentTranslationService();
-                UpdateServiceSpecificSettings(currentService);
+                UpdateServiceSpecificSettings(_serviceDraft?.Service ?? ConfigManager.Instance.GetCurrentTranslationService());
 
                 // Make sure button check language package are properly initialize
                 string currentOcr = ConfigManager.Instance.GetOcrMethod();
@@ -332,18 +411,6 @@ namespace AlpWareStudio.Localay
                     checkLanguagePack.Visibility = Visibility.Collapsed;
                     checkLanguagePackButton.Visibility = Visibility.Collapsed;
                 }
-                // Set selected screen from config
-                int selectedScreenIndex = ConfigManager.Instance.GetSelectedScreenIndex();
-                if (selectedScreenIndex >= 0 && selectedScreenIndex < screenComboBox.Items.Count)
-                {
-                    screenComboBox.SelectedIndex = selectedScreenIndex;
-                }
-                else if (screenComboBox.Items.Count > 0)
-                {
-                    // Default to first screen if saved index is invalid
-                    screenComboBox.SelectedIndex = 0;
-                }
-
                 Console.WriteLine("Settings window fully loaded and initialized. Changes will now be saved.");
                 _settingsLoaded = true;
             }
@@ -363,6 +430,7 @@ namespace AlpWareStudio.Localay
 
                 // Get all screens
                 var screens = System.Windows.Forms.Screen.AllScreens;
+                ObserveCaptureScreenTopology(ConfigManager.DescribeCaptureScreens(screens));
 
                 // Add each screen to the combo box
                 for (int i = 0; i < screens.Length; i++)
@@ -395,11 +463,12 @@ namespace AlpWareStudio.Localay
                     Console.WriteLine($"Screen {i}: {displayName}, {width}x{height}, Primary: {screen.Primary}");
                 }
 
-                // Select by stored screen identity, never by a translated display label.
-                int selectedIndex = ConfigManager.Instance.GetSelectedScreenIndex();
-                if (selectedIndex < 0 || selectedIndex >= screens.Length)
-                    selectedIndex = Array.FindIndex(screens, screen => screen.Primary);
-                screenComboBox.SelectedIndex = selectedIndex >= 0 ? selectedIndex : screens.Length > 0 ? 0 : -1;
+                if (_captureDraft != null) RefreshCaptureDraft();
+                else
+                {
+                    int selectedIndex = ConfigManager.Instance.GetSelectedScreenIndex();
+                    screenComboBox.SelectedIndex = selectedIndex >= 0 && selectedIndex < screens.Length ? selectedIndex : -1;
+                }
 
                 Console.WriteLine($"Loaded {screenComboBox.Items.Count} screens");
             }
@@ -542,159 +611,24 @@ namespace AlpWareStudio.Localay
         // Select screen - placeholder for now
         private void ScreenComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (screenComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    // Get the screen index from the Tag
-                    if (selectedItem.Tag is int screenIndex)
-                    {
-                        // Save to config
-                        ConfigManager.Instance.SetSelectedScreenIndex(screenIndex);
-                        Console.WriteLine($"Selected screen index set to: {screenIndex}");
-
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error handling screen selection change: {ex.Message}");
-            }
+            CaptureFieldChanged(sender);
         }
 
         private void ApiKeyPasswordBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
-            if (e.Key == System.Windows.Input.Key.Enter)
-            {
-                if (sender is PasswordBox passwordBox)
-                {
-                    string apiKey = passwordBox.Password.Trim();
-                    string serviceType = ConfigManager.Instance.GetCurrentTranslationService();
-
-                    if (!string.IsNullOrEmpty(apiKey) && !string.IsNullOrEmpty(serviceType))
-                    {
-                        // Add Api key to list
-                        ConfigManager.Instance.AddApiKey(serviceType, apiKey);
-
-                        // Clear textbox content
-                        passwordBox.Password = "";
-
-                        Console.WriteLine($"Added new API key for {serviceType}");
-
-                        MessageBox.Show(
-                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], UiText.Service(serviceType)),
-                            LocalizationManager.Instance.Strings["Title_ApiKeyAdded"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information
-                        );
-                    }
-                }
-            }
+            if (e.Key != System.Windows.Input.Key.Enter) return;
+            e.Handled = true;
+            AddServiceDraftKey(sender);
         }
 
         private void ViewApiKeysButton_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is System.Windows.Controls.Button button)
-            {
-                string serviceType = ConfigManager.Instance.GetCurrentTranslationService();
-
-                if (!string.IsNullOrEmpty(serviceType))
-                {
-                    // Get list api key
-                    List<string> apiKeys = ConfigManager.Instance.GetApiKeysList(serviceType);
-
-                    // Show API keys management window
-                    ApiKeysWindow apiKeysWindow = new ApiKeysWindow(serviceType, apiKeys);
-                    apiKeysWindow.Owner = this;
-                    apiKeysWindow.ShowDialog();
-                }
-            }
+            ShowServiceDraftKeys(sender);
         }
 
         private void SaveApiKeysButton_Click(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Get current service type
-                string serviceType = ConfigManager.Instance.GetCurrentTranslationService();
-
-                // Get the corresponding PasswordBox
-                PasswordBox? passwordBox = null;
-
-                switch (serviceType)
-                {
-                    case "Gemini":
-                        passwordBox = geminiApiKeyPasswordBox;
-                        break;
-                    case "ChatGPT":
-                        passwordBox = chatGptApiKeyPasswordBox;
-                        break;
-                    case "Mistral":
-                        passwordBox = mistralApiKeyPasswordBox;
-                        break;
-                    case "Groq":
-                        passwordBox = groqApiKeyPasswordBox;
-                        break;
-                    case "Custom API":
-                        passwordBox = customApiKeyPasswordBox;
-                        break;
-                }
-
-                if (passwordBox != null)
-                {
-                    string apiKey = passwordBox.Password.Trim();
-
-                    if (!string.IsNullOrEmpty(apiKey))
-                    {
-                        // add Api key to list
-                        ConfigManager.Instance.AddApiKey(serviceType, apiKey);
-
-                        // Delete content in textbox
-                        passwordBox.Password = "";
-
-                        Console.WriteLine($"Added new API key for {serviceType}");
-
-                        MessageBox.Show(
-                            string.Format(LocalizationManager.Instance.Strings["Msg_ApiKeyAdded"], UiText.Service(serviceType)),
-                            LocalizationManager.Instance.Strings["Title_ApiKeyAdded"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Information
-                        );
-                    }
-                    else
-                    {
-                        MessageBox.Show(
-                            LocalizationManager.Instance.Strings["Msg_PleaseEnterApiKey"],
-                            LocalizationManager.Instance.Strings["Title_EmptyApiKey"],
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning
-                        );
-                    }
-                }
-                else
-                {
-                    MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_NoPasswordField"], UiText.Service(serviceType)),
-                        LocalizationManager.Instance.Strings["Title_ConfigurationError"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error saving API key: {ex.Message}");
-                MessageBox.Show(
-                    string.Format(LocalizationManager.Instance.Strings["Msg_ErrorSavingApiKey"], ex.Message),
-                    LocalizationManager.Instance.Strings["Title_Error"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
-            }
+            AddServiceDraftKey(sender);
         }
         // Handler for application-level keyboard shortcuts
         private void Application_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -706,96 +640,19 @@ namespace AlpWareStudio.Localay
         // Google Translate API Key changed
         private void GoogleTranslateApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                // string apiKey = googleTranslateApiKeyPasswordBox.Password.Trim();
-
-                // // Update the config
-                // ConfigManager.Instance.SetGoogleTranslateApiKey(apiKey);
-                Console.WriteLine("Google Translate API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Google Translate API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // Google Translate Service Type changed
         private void GoogleTranslateServiceTypeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (googleTranslateServiceTypeComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    bool isCloudApi = selectedItem.Content.ToString() == "Cloud API (paid)";
-
-                    // Show/hide API key field based on selection
-                    googleTranslateApiKeyLabel.Visibility = isCloudApi ? Visibility.Visible : Visibility.Collapsed;
-                    googleTranslateApiKeyGrid.Visibility = isCloudApi ? Visibility.Visible : Visibility.Collapsed;
-                    // viewGoogleTranslateKeysButton.Visibility = isCloudApi ? Visibility.Visible : Visibility.Collapsed;
-
-                    // Save to config
-                    ConfigManager.Instance.SetGoogleTranslateUseCloudApi(isCloudApi);
-                    Console.WriteLine($"Google Translate service type set to: {(isCloudApi ? "Cloud API" : "Free Web Service")}");
-
-                    // Trigger retranslation if the current service is Google Translate
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Google Translate")
-                    {
-                        Console.WriteLine("Google Translate service type changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Google Translate service type: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, true);
         }
 
         // Google Translate language mapping checkbox changed
         private void GoogleTranslateMappingCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                bool isEnabled = googleTranslateMappingCheckBox.IsChecked ?? true;
-
-                // Save to config
-                ConfigManager.Instance.SetGoogleTranslateAutoMapLanguages(isEnabled);
-                Console.WriteLine($"Google Translate auto language mapping set to: {isEnabled}");
-
-                // Trigger retranslation if the current service is Google Translate
-                if (ConfigManager.Instance.GetCurrentTranslationService() == "Google Translate")
-                {
-                    Console.WriteLine("Google Translate language mapping changed. Triggering retranslation...");
-
-                    // Reset the hash to force a retranslation
-                    Logic.Instance.ResetHash();
-
-                    // Clear any existing text objects to refresh the display
-                    Logic.Instance.ClearAllTextObjects();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Google Translate language mapping: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Google Translate API link click
@@ -821,22 +678,7 @@ namespace AlpWareStudio.Localay
 
         private void LoadSettingsFromMainWindow()
         {
-            // Temporarily remove event handlers to prevent triggering changes during initialization
-            sourceLanguageComboBox.SelectionChanged -= SourceLanguageComboBox_SelectionChanged;
-            targetLanguageComboBox.SelectionChanged -= TargetLanguageComboBox_SelectionChanged;
-
-            // Remove focus event handlers
-            maxContextPiecesTextBox.LostFocus -= MaxContextPiecesTextBox_LostFocus;
-            minContextSizeTextBox.LostFocus -= MinContextSizeTextBox_LostFocus;
-            minChatBoxTextSizeTextBox.LostFocus -= MinChatBoxTextSizeTextBox_LostFocus;
-            gameInfoTextBox.TextChanged -= GameInfoTextBox_TextChanged;
-            minTextFragmentSizeTextBox.LostFocus -= MinTextFragmentSizeTextBox_LostFocus;
-            minLetterConfidenceTextBox.LostFocus -= MinLetterConfidenceTextBox_LostFocus;
-            minLineConfidenceTextBox.LostFocus -= MinLineConfidenceTextBox_LostFocus;
-            lineSpacingFactorTextBox.LostFocus -= LineSpacingFactorTextBox_LostFocus;
-            blockDetectionPowerTextBox.LostFocus -= BlockDetectionPowerTextBox_LostFocus;
-            settleTimeTextBox.LostFocus -= SettleTimeTextBox_LostFocus;
-
+            // XAML owns the handlers; _isInitializing suppresses writes during hydration.
             // Set context settings
             maxContextPiecesTextBox.Text = ConfigManager.Instance.GetMaxContextPieces().ToString();
             minContextSizeTextBox.Text = ConfigManager.Instance.GetMinContextSize().ToString();
@@ -847,41 +689,14 @@ namespace AlpWareStudio.Localay
             minLineConfidenceTextBox.Text = ConfigManager.Instance.GetMinLineConfidence().ToString(CultureInfo.InvariantCulture);
             lineSpacingFactorTextBox.Text = ConfigManager.Instance.GetLineSpacingFactor().ToString(CultureInfo.InvariantCulture);
 
-            // Reattach focus event handlers
-            maxContextPiecesTextBox.LostFocus += MaxContextPiecesTextBox_LostFocus;
-            minContextSizeTextBox.LostFocus += MinContextSizeTextBox_LostFocus;
-            minChatBoxTextSizeTextBox.LostFocus += MinChatBoxTextSizeTextBox_LostFocus;
-            gameInfoTextBox.TextChanged += GameInfoTextBox_TextChanged;
-            minTextFragmentSizeTextBox.LostFocus += MinTextFragmentSizeTextBox_LostFocus;
-            minLetterConfidenceTextBox.LostFocus += MinLetterConfidenceTextBox_LostFocus;
-            minLineConfidenceTextBox.LostFocus += MinLineConfidenceTextBox_LostFocus;
-            lineSpacingFactorTextBox.LostFocus += LineSpacingFactorTextBox_LostFocus;
-
-            textSimilarThresholdTextBox.LostFocus += TextSimilarThresholdTextBox_LostFocus;
             SelectLanguagesFromConfig();
             ListHotKey_TextChanged();
-
-            // Reattach event handlers
-            sourceLanguageComboBox.SelectionChanged += SourceLanguageComboBox_SelectionChanged;
-            targetLanguageComboBox.SelectionChanged += TargetLanguageComboBox_SelectionChanged;
 
             // Set text similar threshold from config
             textSimilarThresholdTextBox.Text = ConfigManager.Instance.GetTextSimilarThreshold().ToString(CultureInfo.InvariantCulture);
 
             // Set char level from config
             charLevelCheckBox.IsChecked = ConfigManager.Instance.IsCharLevelEnabled();
-
-            // Set show icon signal
-            showIconSignalCheckBox.IsChecked = ConfigManager.Instance.IsShowIconSignalEnabled();
-
-            // Set auto set overlay background color
-            autoSetOverlayBackgroundColorcheckBox.IsChecked = ConfigManager.Instance.IsAutoSetOverlayBackground();
-
-            // Set auto merge overlapping text
-            autoMergeOverlappingTextCheckBox.IsChecked = ConfigManager.Instance.IsAutoMergeOverlappingTextEnabled();
-
-            // Set auto OCR
-            AutoOCRCheckBox.IsChecked = ConfigManager.Instance.IsAutoOCREnabled();
 
             // Set HDR support
             hdrSupportCheckBox.IsChecked = ConfigManager.Instance.IsHDRSupportEnabled();
@@ -894,51 +709,11 @@ namespace AlpWareStudio.Localay
             translationCacheCheckBox.IsChecked = ConfigManager.Instance.IsTranslationCacheEnabled();
             translationPrefetchCheckBox.IsChecked = ConfigManager.Instance.IsTranslationPrefetchEnabled();
 
-            // Set manga mode
-            MangaModeCheckBox.IsChecked = ConfigManager.Instance.IsMangaModeEnabled();
-
-            // Set multi selection area from config
-            multiSelectionAreaCheckBox.IsChecked = ConfigManager.Instance.IsMultiSelectionAreaEnabled();
-            if (!ConfigManager.Instance.IsMultiSelectionAreaEnabled())
-            {
-                isNeedShowMessage = true;
-            }
-
-            // Set OCR settings from config
-            string savedOcrMethod = ConfigManager.Instance.GetOcrMethod();
-            Console.WriteLine($"SettingsWindow: Loading OCR method '{savedOcrMethod}'");
-
-            // Temporarily remove event handler to prevent triggering during initialization
-            ocrMethodComboBox.SelectionChanged -= OcrMethodComboBox_SelectionChanged;
-
-            // Find matching ComboBoxItem
-            foreach (ComboBoxItem item in ocrMethodComboBox.Items)
-            {
-                string itemText = item.Content.ToString() ?? "";
-                if (string.Equals(itemText, savedOcrMethod, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"Found matching OCR method: '{itemText}'");
-                    ocrMethodComboBox.SelectedItem = item;
-                    UpdateMangaModeVisibility(itemText);
-                    break;
-                }
-            }
-
-            // Re-attach event handler
-            ocrMethodComboBox.SelectionChanged += OcrMethodComboBox_SelectionChanged;
-
-            // Get auto-translate setting from config instead of MainWindow
-            // This ensures the setting persists across application restarts
-            autoTranslateCheckBox.IsChecked = ConfigManager.Instance.IsAutoTranslateEnabled();
-            Console.WriteLine($"Settings window: Loading auto-translate from config: {ConfigManager.Instance.IsAutoTranslateEnabled()}");
-
-            // Set leave translation onscreen setting
-            leaveTranslationOnscreenCheckBox.IsChecked = ConfigManager.Instance.IsLeaveTranslationOnscreenEnabled();
+            RefreshCaptureDraft();
+            RefreshResultDraft();
+            RefreshRemainingDrafts();
 
             // Set block detection settings directly from BlockDetectionManager
-            // Temporarily remove event handlers to prevent triggering changes
-            blockDetectionPowerTextBox.LostFocus -= BlockDetectionPowerTextBox_LostFocus;
-            settleTimeTextBox.LostFocus -= SettleTimeTextBox_LostFocus;
 
             blockDetectionPowerTextBox.Text = BlockDetectionManager.Instance.GetBlockDetectionScale().ToString("F2", CultureInfo.InvariantCulture);
             settleTimeTextBox.Text = ConfigManager.Instance.GetBlockDetectionSettleTime().ToString("F2", CultureInfo.InvariantCulture);
@@ -946,54 +721,7 @@ namespace AlpWareStudio.Localay
             Console.WriteLine($"SettingsWindow: Loaded block detection power: {blockDetectionPowerTextBox.Text}");
             Console.WriteLine($"SettingsWindow: Loaded settle time: {settleTimeTextBox.Text}");
 
-            // Reattach event handlers
-            blockDetectionPowerTextBox.LostFocus += BlockDetectionPowerTextBox_LostFocus;
-            settleTimeTextBox.LostFocus += SettleTimeTextBox_LostFocus;
-
-            // Set translation service from config
-            string currentService = ConfigManager.Instance.GetCurrentTranslationService();
-
-            // Temporarily remove event handler
-            translationServiceComboBox.SelectionChanged -= TranslationServiceComboBox_SelectionChanged;
-
-            foreach (ComboBoxItem item in translationServiceComboBox.Items)
-            {
-                if (string.Equals(item.Content.ToString(), currentService, StringComparison.OrdinalIgnoreCase))
-                {
-                    Console.WriteLine($"Found matching translation service: '{item.Content}'");
-                    translationServiceComboBox.SelectedItem = item;
-                    break;
-                }
-            }
-
-            // Re-attach event handler
-            translationServiceComboBox.SelectionChanged += TranslationServiceComboBox_SelectionChanged;
-
-            // Initialize API key for Gemini
-            geminiApiKeyPasswordBox.Password = ConfigManager.Instance.GetGeminiApiKey();
-            // Initialize API key for Custom API
-            customApiKeyPasswordBox.Password = ConfigManager.Instance.GetCustomApiKey();
-            // Initialize API key for Groq
-            groqApiKeyPasswordBox.Password = ConfigManager.Instance.GetGroqApiKey();
-
-            // Initialize Ollama settings
-            ollamaUrlTextBox.Text = ConfigManager.Instance.GetOllamaUrl();
-            ollamaPortTextBox.Text = ConfigManager.Instance.GetOllamaPort();
-            ollamaModelTextBox.Text = ConfigManager.Instance.GetOllamaModel();
-            ollamaTemperatureTextBox.Text = ConfigManager.Instance.GetOllamaTemperature().ToString(CultureInfo.InvariantCulture);
-            ollamaTopPTextBox.Text = ConfigManager.Instance.GetOllamaTopP().ToString(CultureInfo.InvariantCulture);
-            ollamaTopKTextBox.Text = ConfigManager.Instance.GetOllamaTopK().ToString(CultureInfo.InvariantCulture);
-
-            // Initialize LM Studio settings
-            lmstudioUrlTextBox.Text = ConfigManager.Instance.GetLMStudioUrl();
-            lmstudioPortTextBox.Text = ConfigManager.Instance.GetLMStudioPort();
-            lmstudioModelTextBox.Text = ConfigManager.Instance.GetLMStudioModel();
-
-            // Update service-specific settings visibility based on selected service
-            UpdateServiceSpecificSettings(currentService);
-
-            // Load the current service's prompt
-            LoadCurrentServicePrompt();
+            RefreshServiceDraft();
 
             // Load ignore phrases
             LoadIgnorePhrases();
@@ -1001,11 +729,7 @@ namespace AlpWareStudio.Localay
             // Load exclude regions
             LoadExcludeRegions();
 
-            // Load Clipboard Auto-Translate settings
-            clipboardAutoTranslateCheckBox.IsChecked = ConfigManager.Instance.IsClipboardAutoTranslateEnabled();
-            clipboardCopyResultCheckBox.IsChecked = ConfigManager.Instance.IsClipboardCopyResultEnabled();
-            clipboardDebounceTextBox.Text = ConfigManager.Instance.GetClipboardDebounceMs().ToString();
-            clipboardMaxCharsTextBox.Text = ConfigManager.Instance.GetClipboardMaxChars().ToString();
+
         }
 
         // ----- HotKeys tab -----
@@ -1043,15 +767,6 @@ namespace AlpWareStudio.Localay
                 _hotkeyRows.Add(new HotkeySettingRow(function, labelKey, mainWindowLabel));
             }
             hotkeyItemsControl.ItemsSource = _hotkeyRows;
-
-            LocalizationManager.Instance.PropertyChanged += (s, e) =>
-            {
-                foreach (var row in _hotkeyRows)
-                {
-                    row.RefreshText();
-                }
-                UpdateHotkeyConflicts();
-            };
         }
 
         // Reload all hotkeys from config into the Settings table and the MainWindow shortcut list
@@ -1059,7 +774,7 @@ namespace AlpWareStudio.Localay
         {
             foreach (var row in _hotkeyRows)
             {
-                row.Hotkey = ConfigManager.Instance.GetHotKey(row.FunctionName);
+                row.Hotkey = _shortcutDraft != null ? _shortcutDraft[ConfigManager.Instance.HotkeyPreferenceKey(row.FunctionName)] : ConfigManager.Instance.GetHotKey(row.FunctionName);
             }
             RefreshMainWindowHotkeys();
             UpdateHotkeyConflicts();
@@ -1197,48 +912,28 @@ namespace AlpWareStudio.Localay
         private void ResetHotkeysButton_Click(object sender, RoutedEventArgs e)
         {
             StopHotkeyCapture();
-
-            var result = MessageBox.Show(
-                LocalizationManager.Instance["Msg_HotKeyResetConfirm"],
-                LocalizationManager.Instance["Btn_HotKeyReset"],
-                MessageBoxButton.YesNo,
-                MessageBoxImage.Question);
-            if (result != MessageBoxResult.Yes)
-                return;
-
-            ConfigManager.Instance.ResetHotKeysToDefault();
-            ApplyHotkeyChanges();
+            if (_shortcutDraft == null) return;
+            foreach (var row in _hotkeyRows)
+            {
+                row.Hotkey = ConfigManager.Instance.GetDefaultHotKey(row.FunctionName);
+                _shortcutDraft.Set(ConfigManager.Instance.HotkeyPreferenceKey(row.FunctionName), row.Hotkey);
+            }
+            UpdateHotkeyConflicts(); RemainingEdited(false);
         }
 
         // Save a new hotkey for a row ("" clears it), asking before taking the combination from another function
         private void AssignHotkey(HotkeySettingRow row, string hotkey)
         {
-            if (!string.IsNullOrEmpty(hotkey))
-            {
-                var conflict = _hotkeyRows.FirstOrDefault(r => r != row && KeyboardShortcuts.AreSameHotkey(r.Hotkey, hotkey));
-                if (conflict != null)
-                {
-                    var result = MessageBox.Show(
-                        string.Format(LocalizationManager.Instance["Msg_HotKeyConflict"], KeyboardShortcuts.FormatForDisplay(hotkey), conflict.Label),
-                        LocalizationManager.Instance["Title_HotKeyConflict"],
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Warning);
-                    if (result != MessageBoxResult.Yes)
-                        return;
-
-                    ConfigManager.Instance.SetHotKey(conflict.FunctionName, "");
-                }
-            }
-
-            ConfigManager.Instance.SetHotKey(row.FunctionName, hotkey);
-            ApplyHotkeyChanges();
+            if (_shortcutDraft == null) return;
+            row.Hotkey = hotkey;
+            _shortcutDraft.Set(ConfigManager.Instance.HotkeyPreferenceKey(row.FunctionName), hotkey);
+            UpdateHotkeyConflicts();
+            RemainingEdited(false);
         }
 
         private void ApplyHotkeyChanges()
         {
-            KeyboardShortcuts.ReloadHotkeys();
-            ListHotKey_TextChanged();
-            ShowHotkeyStatus(LocalizationManager.Instance["Msg_HotKeyUpdateSuccess"], isError: false);
+            RefreshRemainingDrafts();
         }
 
         private void ShowHotkeyStatus(string message, bool isError)
@@ -1318,142 +1013,27 @@ namespace AlpWareStudio.Localay
 
         private void OcrMethodComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // Skip event if we're initializing
-            if (_isInitializing)
-            {
-                Console.WriteLine("Skipping OCR method change during initialization");
-                return;
-            }
-
-            if (sender is ComboBox comboBox && comboBox.SelectedItem is ComboBoxItem selectedItem)
-            {
-                string? ocrMethod = selectedItem.Content?.ToString();
-
-                if (!string.IsNullOrEmpty(ocrMethod))
-                {
-                    Console.WriteLine($"Setting OCR method to: {ocrMethod}");
-
-                    // Save to config
-                    ConfigManager.Instance.SetOcrMethod(ocrMethod);
-
-                    // Update UI
-                    MainWindow.Instance.SetOcrMethod(ocrMethod);
-                    UpdateMonitorWindowOcrMethod(ocrMethod);
-                    UpdateMangaModeVisibility(ocrMethod);
-
-                    if (ocrMethod != "Windows OCR")
-                    {
-                        checkLanguagePack.Visibility = Visibility.Collapsed;
-                        checkLanguagePackButton.Visibility = Visibility.Collapsed;
-                    }
-                    else
-                    {
-                        checkLanguagePack.Visibility = Visibility.Visible;
-                        checkLanguagePackButton.Visibility = Visibility.Visible;
-                    }
-                    // Both engines are built in, so OCR is always available
-                    MainWindow.Instance.OCRStatusEllipse.Fill = new SolidColorBrush(System.Windows.Media.Color.FromRgb(69, 176, 105)); // Green
-                    MainWindow.Instance.OCRStatusText.Text = LocalizationManager.Instance.Strings["Btn_On"];
-
-                }
-            }
-        }
-
-        private void UpdateMonitorWindowOcrMethod(string ocrMethod)
-        {
-            // Update MonitorWindow OCR method selection
-            if (MonitorWindow.Instance.ocrMethodComboBox != null)
-            {
-                foreach (ComboBoxItem item in MonitorWindow.Instance.ocrMethodComboBox.Items)
-                {
-                    if (string.Equals(item.Content.ToString(), ocrMethod, StringComparison.OrdinalIgnoreCase))
-                    {
-                        MonitorWindow.Instance.ocrMethodComboBox.SelectedItem = item;
-                        break;
-                    }
-                }
-            }
+            CaptureFieldChanged(sender);
         }
 
         private void UpdateMangaModeVisibility(string? ocrMethod)
         {
-            bool showMangaMode = string.Equals(ocrMethod, "OneOCR", StringComparison.OrdinalIgnoreCase);
-
-            if (!showMangaMode && MangaModeCheckBox != null && (MangaModeCheckBox.IsChecked ?? false))
-            {
-                Console.WriteLine("Disabling Manga Mode because OCR method is not OneOCR.");
-
-                if (_isInitializing)
-                {
-                    MangaModeCheckBox.IsChecked = false;
-                    ConfigManager.Instance.SetMangaMode(false);
-                }
-                else
-                {
-                    MangaModeCheckBox.IsChecked = false;
-                }
-            }
-
-            if (MangaModeLabel != null)
-            {
-                MangaModeLabel.Visibility = showMangaMode ? Visibility.Visible : Visibility.Collapsed;
-            }
-
-            if (MangaModeCheckBox != null)
-            {
-                MangaModeCheckBox.Visibility = showMangaMode ? Visibility.Visible : Visibility.Collapsed;
-            }
+            // Visibility only: loading settings must never write configuration.
+            bool show = ocrMethod == "OneOCR" || MangaModeCheckBox.IsChecked == true;
+            MangaModeLabel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+            MangaModeCheckBox.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
         }
 
         private void AutoTranslateCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            // Skip if initializing to prevent overriding values from config
-            if (_isInitializing)
-            {
-                return;
-            }
-
-            bool isEnabled = autoTranslateCheckBox.IsChecked ?? false;
-            Console.WriteLine($"Settings window: Auto-translate changed to {isEnabled}");
-
-            // Update auto translate setting in MainWindow
-            // This will also save to config and update the UI
-            MainWindow.Instance.SetAutoTranslateEnabled(isEnabled);
-
-            // Update MonitorWindow CheckBox if needed
-            if (MonitorWindow.Instance.autoTranslateCheckBox != null)
-            {
-                MonitorWindow.Instance.autoTranslateCheckBox.IsChecked = autoTranslateCheckBox.IsChecked;
-            }
+            CaptureFieldChanged(sender);
         }
 
         private void CharLevelCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            // Skip if initializing to prevent overriding values from config
-            if (_isInitializing)
-            {
-                return;
-            }
-            bool isEnabled = charLevelCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetCharLevelEnabled(isEnabled);
-            // Clear text objects
-            Logic.Instance.ClearAllTextObjects();
-            Logic.Instance.ResetHash();
-            // Force OCR to run again
-            MainWindow.Instance.SetOCRCheckIsWanted(true);
-            Console.WriteLine($"Settings window: Character level mode changed to {isEnabled}");
+            StageRemainingField(sender);
         }
 
-        private void LeaveTranslationOnscreenCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            // Skip if initializing
-            if (_isInitializing)
-                return;
-
-            bool isEnabled = leaveTranslationOnscreenCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetLeaveTranslationOnscreenEnabled(isEnabled);
-            Console.WriteLine($"Leave translation onscreen enabled: {isEnabled}");
-        }
 
         // Language swap button handler
         public void SwapLanguagesButton_Click(object? sender, RoutedEventArgs e)
@@ -1495,134 +1075,24 @@ namespace AlpWareStudio.Localay
         // Block detection settings
         private void BlockDetectionPowerTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            // Skip if initializing to prevent overriding values from config
-            if (_isInitializing)
-            {
-                return;
-            }
-
-            // Update block detection power in MonitorWindow
-            if (MonitorWindow.Instance.blockDetectionPowerTextBox != null)
-            {
-                MonitorWindow.Instance.blockDetectionPowerTextBox.Text = blockDetectionPowerTextBox.Text;
-            }
-
-            // Update BlockDetectionManager if applicable
-            if (float.TryParse(blockDetectionPowerTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out float power))
-            {
-                // Note: SetBlockDetectionScale will save to config
-                BlockDetectionManager.Instance.SetBlockDetectionScale(power);
-                // Reset hash to force recalculation of text blocks
-                Logic.Instance.ResetHash();
-            }
-            else
-            {
-                // If text is invalid, reset to the current value from BlockDetectionManager
-                blockDetectionPowerTextBox.Text = BlockDetectionManager.Instance.GetBlockDetectionScale().ToString("F2", CultureInfo.InvariantCulture);
-            }
+            StageRemainingField(sender);
         }
 
         private void SettleTimeTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            // Skip if initializing to prevent overriding values from config
-            if (_isInitializing)
-            {
-                return;
-            }
-
-            // Update settle time in ConfigManager
-            if (float.TryParse(settleTimeTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out float settleTime) && settleTime >= 0)
-            {
-                ConfigManager.Instance.SetBlockDetectionSettleTime(settleTime);
-                Console.WriteLine($"Block detection settle time set to: {settleTime:F2} seconds");
-
-                // Reset hash to force recalculation of text blocks
-                Logic.Instance.ResetHash();
-            }
-            else
-            {
-                // If text is invalid, reset to the current value from ConfigManager
-                settleTimeTextBox.Text = ConfigManager.Instance.GetBlockDetectionSettleTime().ToString("F2", CultureInfo.InvariantCulture);
-            }
+            StageRemainingField(sender);
         }
 
         // Translation service changed
         private void TranslationServiceComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            // Skip event if we're initializing
-            Console.WriteLine($"SettingsWindow.TranslationServiceComboBox_SelectionChanged called (isInitializing: {_isInitializing})");
-            if (_isInitializing)
-            {
-                Console.WriteLine("Skipping translation service change during initialization");
-                return;
-            }
-
-            try
-            {
-                if (translationServiceComboBox == null)
-                {
-                    Console.WriteLine("Translation service combo box not initialized yet");
-                    return;
-                }
-
-                if (translationServiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string selectedService = selectedItem.Content.ToString() ?? "Gemini";
-
-                    Console.WriteLine($"SettingsWindow translation service changed to: '{selectedService}'");
-
-                    // Save the selected service to config
-                    ConfigManager.Instance.SetTranslationService(selectedService);
-
-                    // Update service-specific settings visibility
-                    UpdateServiceSpecificSettings(selectedService);
-
-                    // Load the prompt for the selected service
-                    LoadCurrentServicePrompt();
-
-                    // Only trigger retranslation if not initializing (i.e., user changed it manually)
-                    if (!_isInitializing)
-                    {
-                        Console.WriteLine("Translation service changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error handling translation service change: {ex.Message}");
-            }
+            ServiceChoiceChanged();
         }
 
         // Load prompt for the currently selected translation service
         private void LoadCurrentServicePrompt()
         {
-            try
-            {
-                if (translationServiceComboBox == null || promptTemplateTextBox == null)
-                {
-                    Console.WriteLine("Translation service controls not initialized yet. Skipping prompt loading.");
-                    return;
-                }
-
-                if (translationServiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string selectedService = selectedItem.Content.ToString() ?? "Gemini";
-                    string prompt = ConfigManager.Instance.GetServicePrompt(selectedService);
-
-                    // Update the text box
-                    promptTemplateTextBox.Text = prompt;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error loading prompt template: {ex.Message}");
-            }
+            HydrateServicePrompt();
         }
 
         // Save prompt button clicked
@@ -1640,51 +1110,14 @@ namespace AlpWareStudio.Localay
         // Save the current prompt to the selected service
         private void SaveCurrentPrompt()
         {
-            if (translationServiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-            {
-                string selectedService = selectedItem.Content.ToString() ?? "Gemini";
-                string prompt = promptTemplateTextBox.Text;
-
-                if (!string.IsNullOrWhiteSpace(prompt))
-                {
-                    // Save to config
-                    bool success = ConfigManager.Instance.SaveServicePrompt(selectedService, prompt);
-
-                    if (success)
-                    {
-                        statusPrompt.Visibility = Visibility.Visible;
-                        statusPrompt.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Green);
-                        // Auto close status after 1.5 second
-                        var timer = new System.Windows.Threading.DispatcherTimer
-                        {
-                            Interval = TimeSpan.FromSeconds(1.5)
-                        };
-
-                        timer.Tick += (s, e) =>
-                        {
-                            statusPrompt.Visibility = Visibility.Collapsed;
-                            timer.Stop();
-                        };
-
-                        timer.Start();
-                    }
-                }
-            }
+            StageServicePrompt();
         }
 
         private void RestoreDefaultPromptButton_Click(object sender, RoutedEventArgs e)
         {
-            // Restore the default prompt for the selected service
-            if (translationServiceComboBox.SelectedItem is ComboBoxItem selectedItem)
-            {
-                string selectedService = selectedItem.Content.ToString() ?? "Gemini";
-                string defaultPrompt = ConfigManager.Instance.GetDefaultServicePrompt(selectedService);
-
-                if (!string.IsNullOrWhiteSpace(defaultPrompt))
-                {
-                    promptTemplateTextBox.Text = defaultPrompt;
-                }
-            }
+            if (!CanEditServiceDraft) return;
+            promptTemplateTextBox.Text = ConfigManager.Instance.GetDefaultServicePrompt(_serviceDraft!.Service);
+            StageServicePrompt();
         }
 
         // Update service-specific settings visibility
@@ -1702,6 +1135,11 @@ namespace AlpWareStudio.Localay
                 bool isYandexSelected = selectedService == "Yandex";
                 bool isGroqSelected = selectedService == "Groq";
                 bool isMicrosoftSelected = selectedService == "Microsoft";
+                bool isMarianSelected = selectedService == MarianTranslationService.ServiceName;
+                marianReadinessText.Visibility = isMarianSelected ? Visibility.Visible : Visibility.Collapsed;
+                if (isMarianSelected)
+                    UiText.Bind(marianReadinessText, System.Windows.Controls.TextBlock.TextProperty,
+                        MarianTranslationService.HasPackage ? "Marian_PackagePresent" : "Marian_PackageMissing");
 
                 // Make sure the window is fully loaded and controls are initialized
                 if (ollamaUrlLabel == null || ollamaUrlTextBox == null ||
@@ -1813,7 +1251,7 @@ namespace AlpWareStudio.Localay
                 googleFreeFallbackComboBox.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
 
                 // Hide prompt template for Google Translate / Yandex / Microsoft
-                bool showPromptTemplate = !isGoogleTranslateSelected && !isYandexSelected && !isMicrosoftSelected;
+                bool showPromptTemplate = !isGoogleTranslateSelected && !isYandexSelected && !isMicrosoftSelected && !isMarianSelected;
                 promptOptionsExpander.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
                 modelSamplingExpander.Visibility = isOllamaSelected ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1828,7 +1266,7 @@ namespace AlpWareStudio.Localay
                 // Show/hide prompt template and related controls for Google Translate
                 promptLabel.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
                 promptTemplateTextBox.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
-                savePromptButton.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
+                savePromptButton.Visibility = Visibility.Collapsed;
                 restoreDefaultPromptButton.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
 
                 // Show/hide Microsoft-specific settings
@@ -1838,180 +1276,6 @@ namespace AlpWareStudio.Localay
                 // SaveMicrosoftKeysButton.Visibility = isMicrosoftSelected ? Visibility.Visible : Visibility.Collapsed;
                 microsoftLegacyModeCheckBox.Visibility = isMicrosoftSelected ? Visibility.Visible : Visibility.Collapsed;
 
-                // Load service-specific settings if they're being shown
-                if (isGeminiSelected)
-                {
-                    geminiApiKeyPasswordBox.Password = ConfigManager.Instance.GetGeminiApiKey();
-
-                    // Set selected Gemini model
-                    string geminiModel = ConfigManager.Instance.GetGeminiModel();
-
-                    // Temporarily remove event handlers to avoid triggering changes
-                    geminiModelComboBox.SelectionChanged -= GeminiModelComboBox_SelectionChanged;
-
-                    // First try to find exact match in dropdown items
-                    bool found = false;
-                    foreach (ComboBoxItem item in geminiModelComboBox.Items)
-                    {
-                        if (string.Equals(item.Content?.ToString(), geminiModel, StringComparison.OrdinalIgnoreCase))
-                        {
-                            geminiModelComboBox.SelectedItem = item;
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    // If not found in dropdown, set as custom text
-                    if (!found)
-                    {
-                        geminiModelComboBox.Text = geminiModel;
-                    }
-
-                    // Reattach event handler
-                    geminiModelComboBox.SelectionChanged += GeminiModelComboBox_SelectionChanged;
-                }
-                else if (isGroqSelected)
-                {
-                    groqApiKeyPasswordBox.Password = ConfigManager.Instance.GetGroqApiKey();
-
-                    // Set selected Groq model
-                    string groqModel = ConfigManager.Instance.GetGroqModel();
-
-                    // Temporarily remove event handlers to avoid triggering changes
-                    groqModelComboBox.SelectionChanged -= GroqModelComboBox_SelectionChanged;
-
-                    // First try to find exact match in dropdown items
-                    bool found = false;
-                    foreach (ComboBoxItem item in groqModelComboBox.Items)
-                    {
-                        if (string.Equals(item.Content?.ToString(), groqModel, StringComparison.OrdinalIgnoreCase))
-                        {
-                            groqModelComboBox.SelectedItem = item;
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    // If not found in dropdown, set as custom text
-                    if (!found)
-                    {
-                        groqModelComboBox.Text = groqModel;
-                    }
-
-                    // Reattach event handler
-                    groqModelComboBox.SelectionChanged += GroqModelComboBox_SelectionChanged;
-                }
-                else if (isCustomApiSelected)
-                {
-                    customApiKeyPasswordBox.Password = ConfigManager.Instance.GetCustomApiKey();
-                    // Temporarily remove event handlers to avoid triggering changes
-                    customApiUrlTextBox.LostFocus -= CustomApiUrlTextBox_LostFocus;
-                    customApiUrlTextBox.Text = ConfigManager.Instance.GetCustomApiUrl();
-
-                    // Temporarily remove event handlers to avoid triggering changes
-                    customApiModelTextBox.TextChanged -= CustomApiModelTextBox_TextChanged;
-
-                    // Set selected Custom API model
-                    customApiModelTextBox.Text = ConfigManager.Instance.GetCustomApiModel();
-
-                    // Reattach event handler
-                    customApiModelTextBox.TextChanged += CustomApiModelTextBox_TextChanged;
-                    customApiUrlTextBox.LostFocus += CustomApiUrlTextBox_LostFocus;
-
-                }
-                else if (isMistralSelected)
-                {
-                    mistralApiKeyPasswordBox.Password = ConfigManager.Instance.GetMistralApiKey();
-
-                    // Set selected Mistral model
-                    string mistralModel = ConfigManager.Instance.GetMistralModel();
-
-                    // Temporarily remove event handlers to avoid triggering changes
-                    mistralModelComboBox.SelectionChanged -= MistralModelComboBox_SelectionChanged;
-
-                    // First try to find exact match in dropdown items
-                    bool found = false;
-                    foreach (ComboBoxItem item in mistralModelComboBox.Items)
-                    {
-                        if (string.Equals(item.Content?.ToString(), mistralModel, StringComparison.OrdinalIgnoreCase))
-                        {
-                            mistralModelComboBox.SelectedItem = item;
-                            found = true;
-                            break;
-                        }
-                    }
-
-                    // If not found in dropdown, set as custom text
-                    if (!found)
-                    {
-                        mistralModelComboBox.Text = mistralModel;
-                    }
-
-                    // Reattach event handler
-                    mistralModelComboBox.SelectionChanged += MistralModelComboBox_SelectionChanged;
-                }
-                else if (isMicrosoftSelected)
-                {
-                    microsoftLegacyKeyPasswordBox.Password = ConfigManager.Instance.GetMicrosoftApiKey();
-                    microsoftLegacyModeCheckBox.IsChecked = ConfigManager.Instance.GetMicrosoftLegacySignatureMode();
-                }
-                else if (isOllamaSelected)
-                {
-                    ollamaUrlTextBox.Text = ConfigManager.Instance.GetOllamaUrl();
-                    ollamaPortTextBox.Text = ConfigManager.Instance.GetOllamaPort();
-                    ollamaModelTextBox.Text = ConfigManager.Instance.GetOllamaModel();
-                    ollamaTemperatureTextBox.Text = ConfigManager.Instance.GetOllamaTemperature().ToString(CultureInfo.InvariantCulture);
-                    ollamaTopPTextBox.Text = ConfigManager.Instance.GetOllamaTopP().ToString(CultureInfo.InvariantCulture);
-                    ollamaTopKTextBox.Text = ConfigManager.Instance.GetOllamaTopK().ToString(CultureInfo.InvariantCulture);
-                }
-                else if (isLMStudioSelected)
-                {
-                    lmstudioUrlTextBox.Text = ConfigManager.Instance.GetLMStudioUrl();
-                    lmstudioPortTextBox.Text = ConfigManager.Instance.GetLMStudioPort();
-                    lmstudioModelTextBox.Text = ConfigManager.Instance.GetLMStudioModel();
-                }
-                else if (isChatGptSelected)
-                {
-                    chatGptApiKeyPasswordBox.Password = ConfigManager.Instance.GetChatGptApiKey();
-
-                    // Set selected model
-                    string model = ConfigManager.Instance.GetChatGptModel();
-                    foreach (ComboBoxItem item in chatGptModelComboBox.Items)
-                    {
-                        if (string.Equals(item.Tag?.ToString(), model, StringComparison.OrdinalIgnoreCase))
-                        {
-                            chatGptModelComboBox.SelectedItem = item;
-                            break;
-                        }
-                    }
-                }
-                else if (isGoogleTranslateSelected)
-                {
-                    // Set Google Translate service type
-                    bool useCloudApi = ConfigManager.Instance.GetGoogleTranslateUseCloudApi();
-
-                    // Temporarily remove event handler
-                    googleTranslateServiceTypeComboBox.SelectionChanged -= GoogleTranslateServiceTypeComboBox_SelectionChanged;
-
-                    googleTranslateServiceTypeComboBox.SelectedIndex = useCloudApi ? 1 : 0; // 0 = Free, 1 = Cloud API
-
-                    // Reattach event handler
-                    googleTranslateServiceTypeComboBox.SelectionChanged += GoogleTranslateServiceTypeComboBox_SelectionChanged;
-
-                    // Set API key if using Cloud API
-                    if (useCloudApi)
-                    {
-                        googleTranslateApiKeyPasswordBox.Password = ConfigManager.Instance.GetGoogleTranslateApiKey();
-                    }
-
-                    // Set language mapping checkbox
-                    googleTranslateMappingCheckBox.IsChecked = ConfigManager.Instance.GetGoogleTranslateAutoMapLanguages();
-
-                    // Fallback service while the free service is rate limited
-                    googleFreeFallbackComboBox.SelectionChanged -= GoogleFreeFallbackComboBox_SelectionChanged;
-                    SelectComboBoxItemByTag(googleFreeFallbackComboBox, ConfigManager.Instance.GetGoogleFreeFallbackService());
-                    googleFreeFallbackComboBox.SelectionChanged += GoogleFreeFallbackComboBox_SelectionChanged;
-                }
             }
             catch (Exception ex)
             {
@@ -2019,317 +1283,94 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        private void AdjustOverlayConfig_Click(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                // Create options window
-                var optionsWindow = new OverlayOptionsWindow();
-
-                // Set the owner to ensure it appears on top of this window
-                optionsWindow.Owner = this;
-
-                // Make this window appear in front
-                this.Topmost = false;
-                this.Topmost = true;
-
-                // Show the dialog
-                var result = optionsWindow.ShowDialog();
-
-                // If user clicked OK, styling will already be applied by the options window
-                if (result == true)
-                {
-                    Console.WriteLine("Chat box options updated");
-
-                    // Create and start the flash animation for visual feedback
-                    CreateFlashAnimation(overlayConfig);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error showing options dialog: {ex.Message}");
-            }
-        }
-
-        private void CreateFlashAnimation(System.Windows.Controls.Button button)
-        {
-            try
-            {
-                // Get the current background brush
-                SolidColorBrush? currentBrush = button.Background as SolidColorBrush;
-
-                if (currentBrush != null)
-                {
-                    // Need to freeze the original brush to animate its clone
-                    currentBrush = currentBrush.Clone();
-                    System.Windows.Media.Color originalColor = currentBrush.Color;
-
-                    // Create a new brush for animation
-                    SolidColorBrush animBrush = new SolidColorBrush(originalColor);
-                    button.Background = animBrush;
-
-                    // Create color animation for the brush's Color property
-                    var animation = new ColorAnimation
-                    {
-                        From = originalColor,
-                        To = Colors.LightGreen,
-                        Duration = new Duration(TimeSpan.FromMilliseconds(200)),
-                        AutoReverse = true,
-                        FillBehavior = FillBehavior.Stop // Stop the animation when complete
-                    };
-
-                    // Apply the animation to the brush's Color property
-                    animBrush.BeginAnimation(SolidColorBrush.ColorProperty, animation);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error creating flash animation: {ex.Message}");
-            }
-        }
 
         // Gemini API Key changed
         private void GeminiApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // string apiKey = geminiApiKeyPasswordBox.Password.Trim();
-
-                // // Update the config
-                // ConfigManager.Instance.SetGeminiApiKey(apiKey);
-                Console.WriteLine("Gemini API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Gemini API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // Custom API Key changed
         private void CustomApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // string apiKey = geminiApiKeyPasswordBox.Password.Trim();
-
-                // // Update the config
-                // ConfigManager.Instance.SetGeminiApiKey(apiKey);
-                Console.WriteLine("Custom API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Custom API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // Groq API Key changed
         private void GroqApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // string apiKey = geminiApiKeyPasswordBox.Password.Trim();
-
-                // // Update the config
-                // ConfigManager.Instance.SetGeminiApiKey(apiKey);
-                Console.WriteLine("Groq API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Groq API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // Microsoft legacy key changed
         private void MicrosoftLegacyKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                Console.WriteLine("Microsoft legacy API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Microsoft API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         private void MicrosoftLegacyModeCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            try
-            {
-                bool enabled = microsoftLegacyModeCheckBox.IsChecked ?? false;
-                ConfigManager.Instance.SetMicrosoftLegacySignatureMode(enabled);
-                Console.WriteLine($"Microsoft legacy signature mode changed: {enabled}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Microsoft legacy mode: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Mistral API Key changed
         private void MistralApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                Console.WriteLine("Mistral API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Mistral API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // Ollama URL changed
         private void OllamaUrlTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            string url = ollamaUrlTextBox.Text.Trim();
-            if (!string.IsNullOrEmpty(url))
-            {
-                ConfigManager.Instance.SetOllamaUrl(url);
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // LM Studio URL changed
         private void LMStudioUrlTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            string url = lmstudioUrlTextBox.Text.Trim();
-            if (!string.IsNullOrEmpty(url))
-            {
-                ConfigManager.Instance.SetLMStudioUrl(url);
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Ollama Port changed
         private void OllamaPortTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            string port = ollamaPortTextBox.Text.Trim();
-            if (!string.IsNullOrEmpty(port))
-            {
-                // Validate that the port is a number
-                if (int.TryParse(port, out _))
-                {
-                    ConfigManager.Instance.SetOllamaPort(port);
-                }
-                else
-                {
-                    // Reset to default if invalid
-                    ollamaPortTextBox.Text = "11434";
-                }
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // LMStudio Port changed
         private void LMStudioPortTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            string port = lmstudioPortTextBox.Text.Trim();
-            if (!string.IsNullOrEmpty(port))
-            {
-                // Validate that the port is a number
-                if (int.TryParse(port, out _))
-                {
-                    ConfigManager.Instance.SetLMStudioPort(port);
-                }
-                else
-                {
-                    // Reset to default if invalid
-                    lmstudioPortTextBox.Text = "1234";
-                }
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Ollama Model changed
         private void OllamaModelTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Skip if initializing or if the sender isn't the expected TextBox
-            if (_isInitializing || sender != ollamaModelTextBox)
-                return;
-
-            string sanitizedModel = ollamaModelTextBox.Text.Trim();
-
-            // Save valid model to config
-            ConfigManager.Instance.SetOllamaModel(sanitizedModel);
-            Console.WriteLine($"Ollama model set to: {sanitizedModel}");
-
-            // Trigger retranslation if the current service is Ollama
-            if (ConfigManager.Instance.GetCurrentTranslationService() == "Ollama")
-            {
-                Console.WriteLine("Ollama model changed. Triggering retranslation...");
-
-                // Reset the hash to force a retranslation
-                Logic.Instance.ResetHash();
-
-                // Clear any existing text objects to refresh the display
-                Logic.Instance.ClearAllTextObjects();
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Ollama Temperature changed
         private void OllamaTemperatureTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_isInitializing || sender != ollamaTemperatureTextBox)
-                return;
-
-            string text = ollamaTemperatureTextBox.Text.Trim();
-            if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float temperature))
-            {
-                ConfigManager.Instance.SetOllamaTemperature(temperature);
-                Console.WriteLine($"Ollama temperature set to: {temperature}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Ollama Top P changed
         private void OllamaTopPTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_isInitializing || sender != ollamaTopPTextBox)
-                return;
-
-            string text = ollamaTopPTextBox.Text.Trim();
-            if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float topP))
-            {
-                ConfigManager.Instance.SetOllamaTopP(topP);
-                Console.WriteLine($"Ollama top_p set to: {topP}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Ollama Top K changed
         private void OllamaTopKTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_isInitializing || sender != ollamaTopKTextBox)
-                return;
-
-            string text = ollamaTopKTextBox.Text.Trim();
-            if (int.TryParse(text, out int topK))
-            {
-                ConfigManager.Instance.SetOllamaTopK(topK);
-                Console.WriteLine($"Ollama top_k set to: {topK}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // LM Studio Model changed
         private void LMStudioModelTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            // Skip if initializing or if the sender isn't the expected TextBox
-            if (_isInitializing || sender != lmstudioModelTextBox)
-                return;
-
-            string sanitizedModel = lmstudioModelTextBox.Text.Trim();
-
-            // Save valid model to config
-            ConfigManager.Instance.SetLMStudioModel(sanitizedModel);
-            Console.WriteLine($"LM Studio model set to: {sanitizedModel}");
-
-            // Trigger retranslation if the current service is LM Studio
-            if (ConfigManager.Instance.GetCurrentTranslationService() == "LM Studio")
-            {
-                Console.WriteLine("LM Studio model changed. Triggering retranslation...");
-
-                // Reset the hash to force a retranslation
-                Logic.Instance.ResetHash();
-
-                // Clear any existing text objects to refresh the display
-                Logic.Instance.ClearAllTextObjects();
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         // Model downloader instance
@@ -2337,6 +1378,7 @@ namespace AlpWareStudio.Localay
 
         private async void TestModelButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_serviceDraft?.IsDirty != false || _serviceDraft.Service != "Ollama") return;
             string model = ollamaModelTextBox.Text.Trim();
             await _modelDownloader.TestAndDownloadModel(model);
         }
@@ -2368,235 +1410,31 @@ namespace AlpWareStudio.Localay
 
         private void GeminiModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model;
-
-                // Handle both dropdown selection and manually typed values
-                if (geminiModelComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    model = selectedItem.Content?.ToString() ?? ConfigManager.DEFAULT_GEMINI_MODEL;
-                }
-                else
-                {
-                    // For manually entered text
-                    model = geminiModelComboBox.Text?.Trim() ?? ConfigManager.DEFAULT_GEMINI_MODEL;
-                }
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetGeminiModel(model);
-                    Console.WriteLine($"Gemini model set to: {model}");
-
-                    // Trigger retranslation if the current service is Gemini
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Gemini")
-                    {
-                        Console.WriteLine("Gemini model changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Gemini model: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, true);
         }
         private void CustomApiUrlTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string url = customApiUrlTextBox.Text?.Trim() ?? "";
-
-                // Save to config
-                ConfigManager.Instance.SetCustomApiUrl(url);
-                Console.WriteLine($"Custom API URL set to: {url}");
-
-                // Trigger retranslation if the current service is Custom API
-                if (ConfigManager.Instance.GetCurrentTranslationService() == "Custom API")
-                {
-                    Console.WriteLine("Custom API URL changed. Triggering retranslation...");
-
-                    // Reset the hash to force a retranslation
-                    Logic.Instance.ResetHash();
-
-                    // Clear any existing text objects to refresh the display
-                    Logic.Instance.ClearAllTextObjects();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Custom API URL: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void CustomApiUrlTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string url = customApiUrlTextBox.Text?.Trim() ?? "";
-
-                // Save to config
-                ConfigManager.Instance.SetCustomApiUrl(url);
-                Console.WriteLine($"Custom API URL set to: {url}");
-
-                // Trigger retranslation if the current service is Custom API
-                if (ConfigManager.Instance.GetCurrentTranslationService() == "Custom API")
-                {
-                    Console.WriteLine("Custom API URL changed. Triggering retranslation...");
-
-                    // Reset the hash to force a retranslation
-                    Logic.Instance.ResetHash();
-
-                    // Clear any existing text objects to refresh the display
-                    Logic.Instance.ClearAllTextObjects();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Custom API URL: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void CustomApiModelTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model = customApiModelTextBox.Text?.Trim() ?? "";
-
-                // Save to config
-                ConfigManager.Instance.SetCustomApiModel(model);
-                Console.WriteLine($"Custom API model set to: {model}");
-
-                // Trigger retranslation if the current service is Custom API
-                if (ConfigManager.Instance.GetCurrentTranslationService() == "Custom API")
-                {
-                    Console.WriteLine("Custom API model changed. Triggering retranslation...");
-
-                    // Reset the hash to force a retranslation
-                    Logic.Instance.ResetHash();
-
-                    // Clear any existing text objects to refresh the display
-                    Logic.Instance.ClearAllTextObjects();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Custom API model: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void GroqModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model;
-
-                // Handle both dropdown selection and manually typed values
-                if (groqModelComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    model = selectedItem.Content?.ToString() ?? "qwen/qwen3-32b";
-                }
-                else
-                {
-                    // For manually entered text
-                    model = groqModelComboBox.Text?.Trim() ?? "qwen/qwen3-32b";
-                }
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetGroqModel(model);
-                    Console.WriteLine($"Groq model set to: {model}");
-
-                    // Trigger retranslation if the current service is Groq
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Groq")
-                    {
-                        Console.WriteLine("Groq model changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Groq model: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, true);
         }
 
         private void MistralModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model;
-
-                // Handle both dropdown selection and manually typed values
-                if (mistralModelComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    model = selectedItem.Content?.ToString() ?? "open-mistral-nemo";
-                }
-                else
-                {
-                    // For manually entered text
-                    model = mistralModelComboBox.Text?.Trim() ?? "open-mistral-nemo";
-                }
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetMistralModel(model);
-                    Console.WriteLine($"Mistral model set to: {model}");
-
-                    // Trigger retranslation if the current service is Mistral
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Mistral")
-                    {
-                        Console.WriteLine("Mistral model changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Mistral model: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, true);
         }
 
         private void ViewGeminiModelsButton_Click(object sender, RoutedEventArgs e)
@@ -2616,134 +1454,22 @@ namespace AlpWareStudio.Localay
 
         private void GeminiModelComboBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model = geminiModelComboBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetGeminiModel(model);
-                    Console.WriteLine($"Gemini model set from text input to: {model}");
-
-                    // Trigger retranslation if the current service is Gemini
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Gemini")
-                    {
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Gemini model from text input: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void CustomApiModelTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model = customApiModelTextBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetCustomApiModel(model);
-                    Console.WriteLine($"Custom API model set from text input to: {model}");
-
-                    // Trigger retranslation if the current service is Custom API
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Custom API")
-                    {
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Custom API model from text input: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void GroqModelComboBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model = groqModelComboBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetGroqModel(model);
-                    Console.WriteLine($"Groq model set from text input to: {model}");
-
-                    // Trigger retranslation if the current service is Groq
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Groq")
-                    {
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Groq model from text input: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void MistralModelComboBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string model = mistralModelComboBox.Text?.Trim() ?? "";
-
-                if (!string.IsNullOrWhiteSpace(model))
-                {
-                    // Save to config
-                    ConfigManager.Instance.SetMistralModel(model);
-                    Console.WriteLine($"Mistral model set from text input to: {model}");
-
-                    // Trigger retranslation if the current service is Mistral
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "Mistral")
-                    {
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating Mistral model from text input: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, false);
         }
 
         private void OllamaDownloadLink_Click(object sender, RoutedEventArgs e)
@@ -2769,58 +1495,13 @@ namespace AlpWareStudio.Localay
         // ChatGPT API Key changed
         private void ChatGptApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                // string apiKey = chatGptApiKeyPasswordBox.Password.Trim();
-
-                // // Update the config
-                // ConfigManager.Instance.SetChatGptApiKey(apiKey);
-                Console.WriteLine("ChatGPT API key updated");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ChatGPT API key: {ex.Message}");
-            }
+            ServiceKeyInputChanged(sender);
         }
 
         // ChatGPT Model changed
         private void ChatGptModelComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (chatGptModelComboBox.SelectedItem is ComboBoxItem selectedItem)
-                {
-                    string model = selectedItem.Tag?.ToString() ?? "gpt-4.1-mini";
-
-                    // Save to config
-                    ConfigManager.Instance.SetChatGptModel(model);
-                    Console.WriteLine($"ChatGPT model set to: {model}");
-
-                    // Trigger retranslation if the current service is ChatGPT
-                    if (ConfigManager.Instance.GetCurrentTranslationService() == "ChatGPT")
-                    {
-                        Console.WriteLine("ChatGPT model changed. Triggering retranslation...");
-
-                        // Reset the hash to force a retranslation
-                        Logic.Instance.ResetHash();
-
-                        // Clear any existing text objects to refresh the display
-                        Logic.Instance.ClearAllTextObjects();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating ChatGPT model: {ex.Message}");
-            }
+            ServiceFieldChanged(sender, true);
         }
 
         private void OpenUrl(string url)
@@ -2845,261 +1526,47 @@ namespace AlpWareStudio.Localay
         // Context settings handlers
         private void MaxContextPiecesTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (int.TryParse(maxContextPiecesTextBox.Text, out int maxContextPieces) && maxContextPieces >= 0)
-                {
-                    ConfigManager.Instance.SetMaxContextPieces(maxContextPieces);
-                    Console.WriteLine($"Max context pieces set to: {maxContextPieces}");
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    maxContextPiecesTextBox.Text = ConfigManager.Instance.GetMaxContextPieces().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating max context pieces: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void MinContextSizeTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (int.TryParse(minContextSizeTextBox.Text, out int minContextSize) && minContextSize >= 0)
-                {
-                    ConfigManager.Instance.SetMinContextSize(minContextSize);
-                    Console.WriteLine($"Min context size set to: {minContextSize}");
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    minContextSizeTextBox.Text = ConfigManager.Instance.GetMinContextSize().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating min context size: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void MinChatBoxTextSizeTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (int.TryParse(minChatBoxTextSizeTextBox.Text, out int minChatBoxTextSize) && minChatBoxTextSize >= 0)
-                {
-                    ConfigManager.Instance.SetChatBoxMinTextSize(minChatBoxTextSize);
-                    Console.WriteLine($"Min ChatBox text size set to: {minChatBoxTextSize}");
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    minChatBoxTextSizeTextBox.Text = ConfigManager.Instance.GetChatBoxMinTextSize().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating min ChatBox text size: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void GameInfoTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                string gameInfo = gameInfoTextBox.Text.Trim();
-                ConfigManager.Instance.SetGameInfo(gameInfo);
-                Console.WriteLine($"Game info updated: {gameInfo}");
-
-                // Reset the hash to force a retranslation when game info changes
-                Logic.Instance.ResetHash();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating game info: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void MinTextFragmentSizeTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (int.TryParse(minTextFragmentSizeTextBox.Text, out int minSize) && minSize >= 0)
-                {
-                    ConfigManager.Instance.SetMinTextFragmentSize(minSize);
-                    Console.WriteLine($"Minimum text fragment size set to: {minSize}");
-
-                    // Reset the hash to force new OCR processing
-                    Logic.Instance.ResetHash();
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    minTextFragmentSizeTextBox.Text = ConfigManager.Instance.GetMinTextFragmentSize().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating minimum text fragment size: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void TextSimilarThresholdTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                // Get last threshold value from config
-                string lastThreshold = ConfigManager.Instance.GetTextSimilarThreshold().ToString(CultureInfo.InvariantCulture);
-
-                // Validate input is a valid number
-                if (!double.TryParse(textSimilarThresholdTextBox.Text, System.Globalization.CultureInfo.InvariantCulture, out double similarThreshold))
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_InvalidNumber"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning
-                    );
-
-                    // Reset textbox to last valid value
-                    textSimilarThresholdTextBox.Text = lastThreshold;
-                    return;
-                }
-
-                // Check range
-                if (similarThreshold > 1.0 || similarThreshold < 0.5)
-                {
-                    // Show warning message
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ValueBetween"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning
-                    );
-
-                    // Reset to current value from config
-                    textSimilarThresholdTextBox.Text = lastThreshold;
-                    Console.WriteLine($"Text similar threshold reset to default value: {lastThreshold}");
-                    return;
-                }
-
-                // If we get here, the value is valid, so save it
-                ConfigManager.Instance.SetTextSimilarThreshold(similarThreshold.ToString(CultureInfo.InvariantCulture));
-                Console.WriteLine($"Text similar threshold updated to: {similarThreshold}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating text similar threshold: {ex}");
-
-                // Restore last known good value in case of any error
-                textSimilarThresholdTextBox.Text = ConfigManager.Instance.GetTextSimilarThreshold().ToString(CultureInfo.InvariantCulture);
-            }
+            StageRemainingField(sender);
         }
 
         private void MinLetterConfidenceTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (double.TryParse(minLetterConfidenceTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double confidence) && confidence >= 0 && confidence <= 1)
-                {
-                    ConfigManager.Instance.SetMinLetterConfidence(confidence);
-                    Console.WriteLine($"Minimum letter confidence set to: {confidence}");
-
-                    // Reset the hash to force new OCR processing
-                    Logic.Instance.ResetHash();
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    minLetterConfidenceTextBox.Text = ConfigManager.Instance.GetMinLetterConfidence().ToString(CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating minimum letter confidence: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void MinLineConfidenceTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                // Skip if initializing
-                if (_isInitializing)
-                    return;
-
-                if (double.TryParse(minLineConfidenceTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double confidence) && confidence >= 0 && confidence <= 1)
-                {
-                    ConfigManager.Instance.SetMinLineConfidence(confidence);
-                    Console.WriteLine($"Minimum line confidence set to: {confidence}");
-
-                    // Reset the hash to force new OCR processing
-                    Logic.Instance.ResetHash();
-                }
-                else
-                {
-                    // Reset to current value from config if invalid
-                    minLineConfidenceTextBox.Text = ConfigManager.Instance.GetMinLineConfidence().ToString(CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating minimum line confidence: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void LineSpacingFactorTextBox_LostFocus(object sender, RoutedEventArgs e)
         {
-            try
-            {
-                if (_isInitializing)
-                    return;
-
-                if (double.TryParse(lineSpacingFactorTextBox.Text, NumberStyles.Any, CultureInfo.InvariantCulture, out double factor) && factor > 0)
-                {
-                    ConfigManager.Instance.SetLineSpacingFactor(factor);
-                    Console.WriteLine($"Line spacing factor set to: {factor:F2}");
-                }
-                else
-                {
-                    lineSpacingFactorTextBox.Text = ConfigManager.Instance.GetLineSpacingFactor().ToString(CultureInfo.InvariantCulture);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating line spacing factor: {ex.Message}");
-            }
+            StageRemainingField(sender);
         }
 
         private void CheckLanguagePackButton_Click(object sender, RoutedEventArgs e)
@@ -3110,258 +1577,22 @@ namespace AlpWareStudio.Localay
 
         private void CreateProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is System.Windows.Controls.Button button)
-            {
-                profileName = profileNameTextBox.Text.Trim();
-
-                if (string.IsNullOrEmpty(profileName))
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_PleaseEnterProfileName"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
-                }
-                else
-                {
-                    // Create profile with current config
-                    ConfigManager.Instance.SaveTranslationAreas(MainWindow.Instance.savedTranslationAreas, profileName);
-                    // Add to combo box
-                    bool exists = false;
-                    foreach (var item in profileComboBox.Items)
-                    {
-                        if (item.ToString() == profileName)
-                        {
-                            profileComboBox.SelectedItem = item;
-                            exists = true;
-                            break;
-                        }
-                    }
-
-                    if (!exists)
-                    {
-                        profileComboBox.Items.Add(profileName);
-                        profileComboBox.SelectedIndex = profileComboBox.Items.Count - 1;
-                    }
-                    // Show status
-                    statusUpdateGameProfile.Visibility = Visibility.Visible;
-                    UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Created", profileName);
-                    statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Green);
-
-                    // Auto close status after 1.5 second
-                    var timer = new System.Windows.Threading.DispatcherTimer
-                    {
-                        Interval = TimeSpan.FromSeconds(1.5)
-                    };
-
-                    timer.Tick += (s, e) =>
-                    {
-                        statusUpdateGameProfile.Text = "";
-                        timer.Stop();
-                    };
-
-                    timer.Start();
-                }
-            }
+            RequestProfileOperation("create");
         }
 
         private void RemoveProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (profileComboBox.SelectedItem != null)
-            {
-                string? selectedText = profileComboBox.SelectedItem.ToString();
-                string filePath = Path.Combine(ConfigManager.Instance._profileFolderPath, $"{selectedText}.txt");
-                if (File.Exists(filePath))
-                {
-                    MessageBoxResult result = MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ConfirmRemoveProfile"],
-                        LocalizationManager.Instance.Strings["Title_Confirm"],
-                        MessageBoxButton.OKCancel,
-                        MessageBoxImage.Information
-                    );
-                    if (result == MessageBoxResult.OK)
-                    {
-                        File.Delete(filePath);
-                        Console.WriteLine("Profile deleted successfully!");
-                        profileComboBox.Items.Remove(selectedText);
-                        profileComboBox.SelectedIndex = -1;
-                        // Clear all save selection areas
-                        MainWindow.Instance.savedTranslationAreas.Clear();
-                        MainWindow.Instance.hasSelectedTranslationArea = false;
-                        MainWindow.Instance.currentAreaIndex = -1;
-                        // Show status
-                        statusUpdateGameProfile.Visibility = Visibility.Visible;
-                        UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Removed", profileName);
-                        statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Red);
-
-                        // Auto close status after 1.5 second
-                        var timer = new System.Windows.Threading.DispatcherTimer
-                        {
-                            Interval = TimeSpan.FromSeconds(1.5)
-                        };
-
-                        timer.Tick += (s, e) =>
-                        {
-                            statusUpdateGameProfile.Text = "";
-                            timer.Stop();
-                        };
-
-                        timer.Start();
-                    }
-                }
-                else
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ProfileNotFound"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
-                }
-            }
-            else
-            {
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_NoProfileSelected"],
-                    LocalizationManager.Instance.Strings["Title_Error"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
-            }
+            RequestProfileOperation("remove");
         }
 
         private void UpdateProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (profileComboBox.SelectedItem != null)
-            {
-                string selectedText = profileComboBox.SelectedItem.ToString() ?? "Default";
-                string filePath = Path.Combine(ConfigManager.Instance._profileFolderPath, $"{selectedText}.txt");
-                if (File.Exists(filePath))
-                {
-                    MessageBoxResult result = MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ConfirmUpdateProfile"],
-                        LocalizationManager.Instance.Strings["Title_Confirm"],
-                        MessageBoxButton.OKCancel,
-                        MessageBoxImage.Information
-                    );
-                    if (result == MessageBoxResult.OK)
-                    {
-                        if (MainWindow.Instance.savedTranslationAreas.Count > 0)
-                        {
-                            ConfigManager.Instance.SaveTranslationAreas(MainWindow.Instance.savedTranslationAreas, selectedText);
-                            Console.WriteLine($"Saved {selectedText}.txt {MainWindow.Instance.savedTranslationAreas.Count} translation areas to config");
-                        }
-                        else
-                        {
-                            // Clear saved areas in config if we have none
-                            ConfigManager.Instance.SaveTranslationAreas(new List<TranslationAreaInfo>(), selectedText);
-                            Console.WriteLine("Cleared translation areas in config");
-                        }
-                        // Show status
-                        statusUpdateGameProfile.Visibility = Visibility.Visible;
-                        UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Updated", profileName);
-                        statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Orange);
-
-                        // Auto close status after 1.5 second
-                        var timer = new System.Windows.Threading.DispatcherTimer
-                        {
-                            Interval = TimeSpan.FromSeconds(1.5)
-                        };
-
-                        timer.Tick += (s, e) =>
-                        {
-                            statusUpdateGameProfile.Text = "";
-                            timer.Stop();
-                        };
-
-                        timer.Start();
-                    }
-
-                }
-                else
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ProfileNotFoundCreate"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
-                }
-            }
-            else
-            {
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_NoProfileSelected"],
-                    LocalizationManager.Instance.Strings["Title_Error"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
-            }
+            RequestProfileOperation("update");
         }
 
         private void LoadProfileButton_Click(object sender, RoutedEventArgs e)
         {
-            if (profileComboBox.SelectedItem != null)
-            {
-                string? selectedText = profileComboBox.SelectedItem.ToString();
-                string filePath = Path.Combine(ConfigManager.Instance._profileFolderPath, $"{selectedText}.txt");
-                if (File.Exists(filePath))
-                {
-                    // Get saved areas from config (this loads the whole profile config)
-                    List<TranslationAreaInfo> areas = ConfigManager.Instance.GetTranslationAreas(filePath);
-                    MainWindow.Instance.ReloadExcludeRegionsFromConfig();
-                    if (areas.Count > 0)
-                    {
-                        // Update our areas list
-                        MainWindow.Instance.savedTranslationAreas.Clear();
-                        MainWindow.Instance.savedTranslationAreas = areas;
-                        MainWindow.Instance.hasSelectedTranslationArea = true;
-                        MainWindow.Instance.SwitchToTranslationArea(MainWindow.Instance.savedTranslationAreas.Count - 1);
-                    }
-                    else
-                    {
-                        Console.WriteLine("No translation areas found in config");
-                    }
-                    // Show status
-                    statusUpdateGameProfile.Visibility = Visibility.Visible;
-                    UiText.Bind(statusUpdateGameProfile, TextBlock.TextProperty, "Profile_Loaded", profileName);
-                    statusUpdateGameProfile.Foreground = new SolidColorBrush(System.Windows.Media.Colors.Violet);
-                    ReloadSetting();
-
-                    // Auto close status after 1.5 second
-                    var timer = new System.Windows.Threading.DispatcherTimer
-                    {
-                        Interval = TimeSpan.FromSeconds(1.5)
-                    };
-
-                    timer.Tick += (s, e) =>
-                    {
-                        statusUpdateGameProfile.Text = "";
-                        timer.Stop();
-                    };
-
-                    timer.Start();
-                }
-                else
-                {
-                    MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_ProfileNotFoundCreate"],
-                        LocalizationManager.Instance.Strings["Title_Error"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Error
-                    );
-                }
-            }
-            else
-            {
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_NoProfileSelected"],
-                    LocalizationManager.Instance.Strings["Title_Error"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Error
-                );
-            }
+            RequestProfileOperation("load");
         }
 
         private void LoadAllProfile()
@@ -3392,6 +1623,11 @@ namespace AlpWareStudio.Localay
 
         // Handle Clear Context button click
         private void ClearContextButton_Click(object sender, RoutedEventArgs e)
+        {
+            RequestSettingsDecision(() => ExecuteClearContextButton_Click(sender, e));
+        }
+
+        private void ExecuteClearContextButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -3437,7 +1673,7 @@ namespace AlpWareStudio.Localay
             {
                 _ignorePhrases.Clear();
 
-                var phrases = ConfigManager.Instance.GetIgnorePhrases();
+                IReadOnlyList<(string Phrase, IgnorePhraseMatchType MatchType)> phrases = _advancedDraft != null ? ConfigManager.ParseIgnorePhrases(_advancedDraft[ConfigManager.IGNORE_PHRASES]) : ConfigManager.Instance.GetIgnorePhrases();
 
                 foreach (var (phrase, matchType) in phrases)
                 {
@@ -3464,21 +1700,10 @@ namespace AlpWareStudio.Localay
         // Save all ignore phrases to ConfigManager
         private void SaveIgnorePhrases()
         {
-            try
-            {
-                if (_isInitializing)
-                    return;
-
-                var phrases = _ignorePhrases.Select(p => (p.Phrase, p.MatchType)).ToList();
-
-                ConfigManager.Instance.SaveIgnorePhrases(phrases);
-
-                Logic.Instance.ResetHash();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error saving ignore phrases: {ex.Message}");
-            }
+            if (_isInitializing || _syncingRemainingDrafts || _advancedDraft == null) return;
+            string encoded = string.Concat(_ignorePhrases.Select(p => ConfigManager.EncodeIgnorePhrase(p.Phrase) + "|" + p.MatchType + "|"));
+            _advancedDraft.Set(ConfigManager.IGNORE_PHRASES, encoded);
+            RemainingEdited(true);
         }
 
         // An invalid pattern used to be saved silently and then never matched (the compile error
@@ -3655,15 +1880,6 @@ namespace AlpWareStudio.Localay
                 {
                     string phrase = selectedPhrase.Phrase;
 
-                    // Ask for confirmation
-                    MessageBoxResult result = MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_ConfirmRemovePhrase"], phrase),
-                        LocalizationManager.Instance.Strings["Title_Confirm"],
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question
-                    );
-
-                    if (result == MessageBoxResult.Yes)
                     {
                         // Remove from the collection
                         _ignorePhrases.Remove(selectedPhrase);
@@ -3770,11 +1986,19 @@ namespace AlpWareStudio.Localay
         private void AddExcludeRegionButton_Click(object sender, RoutedEventArgs e)
         {
             // Hide settings window; the list updates through ExcludeRegionsChanged once the region is drawn
-            this.Hide();
-            MainWindow.Instance.ToggleExcludeRegionSelector();
+            RequestSettingsDecision(() =>
+            {
+                Hide();
+                MainWindow.Instance.ToggleExcludeRegionSelector();
+            });
         }
 
         private void RemoveExcludeRegionButton_Click(object sender, RoutedEventArgs e)
+        {
+            RequestSettingsDecision(() => ExecuteRemoveExcludeRegionButton_Click(sender, e));
+        }
+
+        private void ExecuteRemoveExcludeRegionButton_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.DataContext is ExcludeRegionItem item)
             {
@@ -3784,6 +2008,11 @@ namespace AlpWareStudio.Localay
 
         // Clear all exclude regions
         private void ClearExcludeRegionsButton_Click(object sender, RoutedEventArgs e)
+        {
+            RequestSettingsDecision(() => ExecuteClearExcludeRegionsButton_Click(sender, e));
+        }
+
+        private void ExecuteClearExcludeRegionsButton_Click(object sender, RoutedEventArgs e)
         {
             try
             {
@@ -3812,13 +2041,6 @@ namespace AlpWareStudio.Localay
             MainWindow.Instance.SetShowExcludeRegions(show);
         }
 
-        private void ShowIconSignal_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            bool enabled = showIconSignalCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetShowIconSignal(enabled);
-            Console.WriteLine($"Show icon signal set to {enabled}");
-        }
 
         // private void OpenAiRealtimeApiKeyPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
         // {
@@ -3831,21 +2053,7 @@ namespace AlpWareStudio.Localay
         // Handle Multi selection area checkbox change for multi selection area
         private void MultiSelectionAreaCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            bool enabled = multiSelectionAreaCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetUseMultiSelectionArea(enabled);
-            Console.WriteLine($"Settings window: Multi selection area set to {enabled}");
-            if (isNeedShowMessage)
-            {
-                // Show notification
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_MultiSelectionGuide"],
-                    LocalizationManager.Instance.Strings["Title_MultiSelectionGuide"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
-            }
-            isNeedShowMessage = !enabled;
+            CaptureFieldChanged(sender);
         }
 
         private void Hyperlink_RequestNavigate(object sender, RequestNavigateEventArgs e)
@@ -3867,70 +2075,33 @@ namespace AlpWareStudio.Localay
 
         private void AutoOCRCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            bool enabled = AutoOCRCheckBox.IsChecked ?? true;
-            ConfigManager.Instance.SetAutoOCR(enabled);
-            Console.WriteLine($"Auto OCR set to {enabled}");
-            if (isNeedShowWarningAutoOCR && !enabled)
-            {
-                // Show notification
-                MessageBox.Show(
-                    LocalizationManager.Instance.Strings["Msg_AutoOCRDisabled"],
-                    LocalizationManager.Instance.Strings["Title_AutoOCRDisabled"],
-                    MessageBoxButton.OK,
-                    MessageBoxImage.Information
-                );
-            }
-            isNeedShowWarningAutoOCR = enabled;
+            CaptureFieldChanged(sender);
         }
 
-        private void AutoSetOverlayBackgroundColorcheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            bool enabled = autoSetOverlayBackgroundColorcheckBox.IsChecked ?? true;
-            ConfigManager.Instance.SetAutoSetOverlayBackground(enabled);
-            Console.WriteLine($"Auto set overlay background color set to {enabled}");
-        }
-
-        private void AutoMergeOverlappingTextCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            if (_isInitializing) return;
-            bool enabled = autoMergeOverlappingTextCheckBox.IsChecked ?? true;
-            ConfigManager.Instance.SetAutoMergeOverlappingText(enabled);
-            Console.WriteLine($"Auto merge overlapping text set to {enabled}");
-        }
 
         private void LlmPreferSpeedCheckBox_Changed(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            ConfigManager.Instance.SetLlmPreferSpeedEnabled(llmPreferSpeedCheckBox.IsChecked == true);
+            StageRemainingField(sender);
         }
 
         private void TranslationPrefetchCheckBox_Changed(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            ConfigManager.Instance.SetTranslationPrefetchEnabled(translationPrefetchCheckBox.IsChecked == true);
+            StageRemainingField(sender);
         }
 
         private void TranslationCacheCheckBox_Changed(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing) return;
-            ConfigManager.Instance.SetTranslationCacheEnabled(translationCacheCheckBox.IsChecked == true);
+            StageRemainingField(sender);
         }
 
         private void SetHotKeyEnableCheckBox_CheckChange(object sender, RoutedEventArgs e)
         {
-            bool enabled = hotKeyEnableCheckBox.IsChecked ?? true;
-            ConfigManager.Instance.SetHotKeyEnable(enabled);
-            KeyboardShortcuts.ReloadHotkeys();
-            Console.WriteLine($"Hot key enable set to {enabled}");
+            StageRemainingField(sender);
         }
 
         private void HDRSupportCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            bool enabled = hdrSupportCheckBox.IsChecked ?? true;
-            ConfigManager.Instance.SetHDRSupportEnabled(enabled);
-            Console.WriteLine($"HDR support set to {enabled}");
+            StageRemainingField(sender);
         }
 
         // Select the item whose Tag matches (case-insensitive); falls back to the first item
@@ -3952,133 +2123,13 @@ namespace AlpWareStudio.Localay
 
         private void GoogleFreeFallbackComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isInitializing) return;
-            string? service = SelectedTag(googleFreeFallbackComboBox);
-            if (service == null) return;
-            ConfigManager.Instance.SetGoogleFreeFallbackService(service);
-            Console.WriteLine($"Google Translate (free) fallback set to: {service}");
+            ServiceFieldChanged(sender, true);
         }
 
-        #region Clipboard Auto-Translate Event Handlers
-
-        private void ClipboardAutoTranslateCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            // Skip if initializing
-            if (_isInitializing) return;
-
-            try
-            {
-                bool enabled = clipboardAutoTranslateCheckBox.IsChecked ?? false;
-                if (enabled && MessageBox.Show(LocalizationManager.Instance["Msg_ClipboardPrivacy"],
-                    "Localay", MessageBoxButton.YesNo, MessageBoxImage.Information, MessageBoxResult.No) != MessageBoxResult.Yes)
-                {
-                    clipboardAutoTranslateCheckBox.IsChecked = false;
-                    return;
-                }
-                ConfigManager.Instance.SetValue("clipboard_privacy_consent_v1", enabled ? "true" : "false");
-                ConfigManager.Instance.SetClipboardAutoTranslateEnabled(enabled);
-                Console.WriteLine($"Clipboard auto-translate enabled: {enabled}");
-
-                // Update MainWindow clipboard monitor state
-                MainWindow.Instance?.UpdateClipboardMonitorState();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating clipboard auto-translate: {ex.Message}");
-            }
-        }
-
-        private void ClipboardCopyResultCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
-        {
-            // Skip if initializing
-            if (_isInitializing) return;
-
-            try
-            {
-                bool enabled = clipboardCopyResultCheckBox.IsChecked ?? true;
-                ConfigManager.Instance.SetClipboardCopyResultEnabled(enabled);
-                Console.WriteLine($"Clipboard copy result enabled: {enabled}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating clipboard copy result: {ex.Message}");
-            }
-        }
-
-        private void ClipboardDebounceTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            // Skip if initializing
-            if (_isInitializing) return;
-
-            try
-            {
-                string debounceText = clipboardDebounceTextBox.Text?.Trim() ?? "";
-
-                if (int.TryParse(debounceText, out int debounceMs))
-                {
-                    ConfigManager.Instance.SetClipboardDebounceMs(debounceMs);
-                    Console.WriteLine($"Clipboard debounce set to: {debounceMs}ms");
-
-                    // Update MainWindow clipboard monitor
-                    MainWindow.Instance?.UpdateClipboardMonitorState();
-                }
-                else
-                {
-                    // Reset to current config value
-                    clipboardDebounceTextBox.Text = ConfigManager.Instance.GetClipboardDebounceMs().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating clipboard debounce: {ex.Message}");
-            }
-        }
-
-        private void ClipboardMaxCharsTextBox_LostFocus(object sender, RoutedEventArgs e)
-        {
-            // Skip if initializing
-            if (_isInitializing) return;
-
-            try
-            {
-                string maxCharsText = clipboardMaxCharsTextBox.Text?.Trim() ?? "";
-
-                if (int.TryParse(maxCharsText, out int maxChars))
-                {
-                    ConfigManager.Instance.SetClipboardMaxChars(maxChars);
-                    Console.WriteLine($"Clipboard max chars set to: {maxChars}");
-
-                    // Update MainWindow clipboard monitor
-                    MainWindow.Instance?.UpdateClipboardMonitorState();
-                }
-                else
-                {
-                    // Reset to current config value
-                    clipboardMaxCharsTextBox.Text = ConfigManager.Instance.GetClipboardMaxChars().ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error updating clipboard max chars: {ex.Message}");
-            }
-        }
-
-        #endregion
 
         private void MangaModeCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
-            if (_isInitializing)
-            {
-                return;
-            }
-
-            bool enabled = MangaModeCheckBox.IsChecked ?? false;
-            ConfigManager.Instance.SetMangaMode(enabled);
-            Console.WriteLine($"Manga mode set to {enabled}");
-
-            Logic.Instance.ResetHash();
-            Logic.Instance.ClearAllTextObjects();
-            MainWindow.Instance.SetOCRCheckIsWanted(true);
+            CaptureFieldChanged(sender);
         }
     }
 }

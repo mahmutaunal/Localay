@@ -39,6 +39,7 @@ public partial class AboutWindow : Window
     private void Contact_Click(object sender, RoutedEventArgs e) => OpenLink(AppIdentity.ContactUrl);
     private void Source_Click(object sender, RoutedEventArgs e) => OpenLink(AppIdentity.ProjectUrl);
     private void Releases_Click(object sender, RoutedEventArgs e) => OpenLink(AppIdentity.ReleasesUrl);
+    private async void CheckForUpdates_Click(object sender, RoutedEventArgs e) => await UpdateCoordinator.CheckAsync(true);
     private void Issues_Click(object sender, RoutedEventArgs e) => OpenLink(AppIdentity.IssuesUrl);
     private void Upstream_Click(object sender, RoutedEventArgs e) => OpenLink(AppIdentity.UpstreamUrl);
     private void Close_Click(object sender, RoutedEventArgs e) => Close();

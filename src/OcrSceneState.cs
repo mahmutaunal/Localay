@@ -12,7 +12,9 @@ internal sealed class OcrSceneSnapshot
 {
     private readonly OcrSceneBlock[] _blocks;
     internal OcrSceneSnapshot(IEnumerable<OcrSceneBlock> blocks) => _blocks = blocks.ToArray();
+    internal IReadOnlyList<OcrSceneBlock> Blocks => _blocks;
     internal bool IsEmpty => _blocks.Length == 0;
+    internal int BlockCount => _blocks.Length;
 
     internal bool HasSameText(OcrSceneSnapshot other) =>
         _blocks.Select(b => b.Text).SequenceEqual(other._blocks.Select(b => b.Text), StringComparer.Ordinal);
@@ -36,19 +38,35 @@ internal sealed class OcrSceneSnapshot
     {
         var blocks = new List<OcrSceneBlock>();
         foreach (var item in results.EnumerateArray())
-        {
-            if (!item.TryGetProperty("text", out var textValue) ||
-                !item.TryGetProperty("confidence", out _) ||
-                !item.TryGetProperty("rect", out var rect)) continue;
-            string text = textValue.GetString() ?? "";
-            if (string.IsNullOrWhiteSpace(text) || text.Length < minimumTextLength) continue;
-            var points = rect.EnumerateArray().Select(p => (X: p[0].GetDouble(), Y: p[1].GetDouble())).ToArray();
-            if (points.Length == 0 || points.Any(p => !double.IsFinite(p.X) || !double.IsFinite(p.Y))) continue;
-            double x = points.Min(p => p.X), y = points.Min(p => p.Y);
-            blocks.Add(new(text, x, y, points.Max(p => p.X) - x, points.Max(p => p.Y) - y));
-        }
+            if (TryReadBlock(item, minimumTextLength, out var block)) blocks.Add(block!);
         return new(blocks);
     }
+
+    internal static bool TryReadBlock(JsonElement item, int minimumTextLength, out OcrSceneBlock? block)
+    {
+        block = null;
+        if (item.ValueKind != JsonValueKind.Object ||
+            !item.TryGetProperty("text", out var textValue) || textValue.ValueKind != JsonValueKind.String ||
+            !item.TryGetProperty("confidence", out _) || !item.TryGetProperty("rect", out var rect) ||
+            rect.ValueKind != JsonValueKind.Array) return false;
+        string text = textValue.GetString() ?? "";
+        if (string.IsNullOrWhiteSpace(text) || text.Length < minimumTextLength) return false;
+        double left = double.PositiveInfinity, top = double.PositiveInfinity;
+        double right = double.NegativeInfinity, bottom = double.NegativeInfinity;
+        foreach (var p in rect.EnumerateArray())
+        {
+            if (p.ValueKind != JsonValueKind.Array || p.GetArrayLength() < 2 ||
+                p[0].ValueKind != JsonValueKind.Number || p[1].ValueKind != JsonValueKind.Number ||
+                !p[0].TryGetDouble(out double x) || !p[1].TryGetDouble(out double y) ||
+                !double.IsFinite(x) || !double.IsFinite(y)) return false;
+            left = Math.Min(left, x); top = Math.Min(top, y);
+            right = Math.Max(right, x); bottom = Math.Max(bottom, y);
+        }
+        if (right <= left || bottom <= top) return false;
+        block = new(text, left, top, right - left, bottom - top);
+        return true;
+    }
+
 }
 
 // Accessed on the UI thread. Keep only the latest observation while a translation is busy.
@@ -57,14 +75,32 @@ internal sealed class OcrSceneState
     internal OcrSceneSnapshot? Latest { get; private set; }
     internal OcrSceneSnapshot? Rendered { get; private set; }
     private string? _deferred;
-    internal bool IsTranslating { get; private set; }
-    internal bool TryBeginTranslation()
+    private long _nextTranslationId;
+    private long? _translationOwner;
+    internal long Generation { get; private set; }
+    internal bool IsTranslating => _translationOwner.HasValue;
+    internal bool TryBeginTranslation(out long operationId)
     {
+        operationId = 0;
         if (IsTranslating) return false;
-        IsTranslating = true;
+        operationId = ++_nextTranslationId;
+        _translationOwner = operationId;
         return true;
     }
-    internal void EndTranslation() => IsTranslating = false;
+    internal bool EndTranslation(long operationId)
+    {
+        if (_translationOwner != operationId) return false;
+        _translationOwner = null;
+        return true;
+    }
+    // Invalidation releases the UI immediately, even if an old provider takes
+    // longer to observe cancellation. Its finally block no longer owns this state.
+    internal void CancelTranslation()
+    {
+        _translationOwner = null;
+        _deferred = null;
+        Generation++;
+    }
     internal bool HasDeferred => _deferred != null;
     internal bool IsCurrent => Latest != null && Rendered != null && Rendered.HasSameLayout(Latest);
     internal bool Observe(OcrSceneSnapshot snapshot)

@@ -3,31 +3,31 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:AlpWareStudio.Localay">
     <Application.Resources>
-    <Color x:Key="BgColor">#F7FAFC</Color>
+    <Color x:Key="BgColor">#F5F7FB</Color>
     <Color x:Key="SurfaceColor">#FFFFFF</Color>
-    <Color x:Key="Surface2Color">#F3F8FD</Color>
-    <Color x:Key="Surface3Color">#EBF4FB</Color>
-    <Color x:Key="AccentColor">#0066CC</Color>
-    <Color x:Key="BorderColor">#E0ECF8</Color>
-    <Color x:Key="NeutralBgColor">#E6EEF3</Color>
-    <Color x:Key="SuccessColor">#15803D</Color>
-    <Color x:Key="WarningColor">#B45309</Color>
-    <Color x:Key="DangerColor">#DC2626</Color>
-    <Color x:Key="LinkColor">#0066CC</Color>
+    <Color x:Key="Surface2Color">#EDF2F8</Color>
+    <Color x:Key="Surface3Color">#EDF2F8</Color>
+    <Color x:Key="AccentColor">#185EC8</Color>
+    <Color x:Key="BorderColor">#CBD5E1</Color>
+    <Color x:Key="NeutralBgColor">#E9EEF5</Color>
+    <Color x:Key="SuccessColor">#17603C</Color>
+    <Color x:Key="WarningColor">#805213</Color>
+    <Color x:Key="DangerColor">#A32E37</Color>
+    <Color x:Key="LinkColor">#185EC8</Color>
 
-    <SolidColorBrush x:Key="BgBrush" Color="{DynamicResource BgColor}"/>
-    <SolidColorBrush x:Key="SurfaceBrush" Color="{DynamicResource SurfaceColor}"/>
-    <SolidColorBrush x:Key="Surface2Brush" Color="{DynamicResource Surface2Color}"/>
-    <SolidColorBrush x:Key="Surface3Brush" Color="{DynamicResource Surface3Color}"/>
-    <SolidColorBrush x:Key="NeutralBgBrush" Color="{DynamicResource NeutralBgColor}"/>
-    <SolidColorBrush x:Key="AccentBrush" Color="{DynamicResource AccentColor}"/>
-    <SolidColorBrush x:Key="BorderBrush" Color="{DynamicResource BorderColor}"/>
-    <SolidColorBrush x:Key="TextBrush" Color="#0B2545"/>
-    <SolidColorBrush x:Key="MutedBrush" Color="#5B6B7A"/>
-    <SolidColorBrush x:Key="SuccessBrush" Color="{DynamicResource SuccessColor}"/>
-    <SolidColorBrush x:Key="WarningBrush" Color="{DynamicResource WarningColor}"/>
-    <SolidColorBrush x:Key="DangerBrush" Color="{DynamicResource DangerColor}"/>
-    <SolidColorBrush x:Key="LinkBrush" Color="{DynamicResource LinkColor}"/>
+    <SolidColorBrush x:Key="BgBrush" Color="#F5F7FB"/>
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="Surface2Brush" Color="#EDF2F8"/>
+    <SolidColorBrush x:Key="Surface3Brush" Color="#EDF2F8"/>
+    <SolidColorBrush x:Key="NeutralBgBrush" Color="#E9EEF5"/>
+    <SolidColorBrush x:Key="AccentBrush" Color="#185EC8"/>
+    <SolidColorBrush x:Key="BorderBrush" Color="#CBD5E1"/>
+    <SolidColorBrush x:Key="TextBrush" Color="#192A3E"/>
+    <SolidColorBrush x:Key="MutedBrush" Color="#526275"/>
+    <SolidColorBrush x:Key="SuccessBrush" Color="#17603C"/>
+    <SolidColorBrush x:Key="WarningBrush" Color="#805213"/>
+    <SolidColorBrush x:Key="DangerBrush" Color="#A32E37"/>
+    <SolidColorBrush x:Key="LinkBrush" Color="#185EC8"/>
 
     <Style TargetType="{x:Type Hyperlink}">
         <Setter Property="Foreground" Value="{DynamicResource LinkBrush}"/>
@@ -50,11 +50,11 @@
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsHighlighted" Value="True">
                             <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
                         </Trigger>
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
-                            <Setter Property="Foreground" Value="White"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -133,6 +133,105 @@
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+    <!-- Shared design system. ThemeManager refreshes these semantic brushes in place. -->
+    <SolidColorBrush x:Key="ControlBorderBrush" Color="#7A8BA0"/>
+    <SolidColorBrush x:Key="AccentTextBrush" Color="#FFFFFF"/>
+    <SolidColorBrush x:Key="AccentHoverBrush" Color="#124EA8"/>
+    <SolidColorBrush x:Key="AccentPressedBrush" Color="#103E85"/>
+    <SolidColorBrush x:Key="SelectionBrush" Color="#EAF1FE"/>
+    <SolidColorBrush x:Key="FocusBrush" Color="#185EC8"/>
+    <SolidColorBrush x:Key="WarningSurfaceBrush" Color="#FFF4DD"/>
+    <SolidColorBrush x:Key="DangerSurfaceBrush" Color="#FDEFF0"/>
+    <Style x:Key="LocalayFocus" TargetType="Control">
+        <Setter Property="Template"><Setter.Value><ControlTemplate>
+            <Rectangle Margin="-4" Stroke="{DynamicResource FocusBrush}" StrokeThickness="2" RadiusX="8" RadiusY="8"/>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="LocalayButton" TargetType="Button">
+        <Setter Property="Background" Value="{DynamicResource SurfaceBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ControlBorderBrush}"/>
+        <Setter Property="BorderThickness" Value="1"/>
+        <Setter Property="Padding" Value="16,9"/>
+        <Setter Property="MinHeight" Value="40"/>
+        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource LocalayFocus}"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
+        <Setter Property="HorizontalContentAlignment" Value="Center"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Border x:Name="frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="frame" Property="Background" Value="{DynamicResource SelectionBrush}"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="frame" Property="Background" Value="{DynamicResource NeutralBgBrush}"/>
+                    <Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style TargetType="Button" BasedOn="{StaticResource LocalayButton}"/>
+    <Style x:Key="LocalayPrimaryButton" TargetType="Button" BasedOn="{StaticResource LocalayButton}">
+        <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentTextBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+        <Setter Property="MinHeight" Value="44"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+            <Border x:Name="frame" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="6" Padding="{TemplateBinding Padding}">
+                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="frame" Property="Background" Value="{DynamicResource AccentHoverBrush}"/></Trigger>
+                <Trigger Property="IsPressed" Value="True"><Setter TargetName="frame" Property="Background" Value="{DynamicResource AccentPressedBrush}"/></Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter TargetName="frame" Property="Background" Value="{DynamicResource NeutralBgBrush}"/>
+                    <Setter TargetName="frame" Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="LocalayQuietButton" TargetType="Button" BasedOn="{StaticResource LocalayButton}">
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="BorderBrush" Value="Transparent"/>
+        <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+    </Style>
+    <Style x:Key="LocalaySection" TargetType="Border">
+        <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        <Setter Property="BorderThickness" Value="0,1,0,0"/>
+        <Setter Property="Padding" Value="0,20"/>
+    </Style>
+    <Style x:Key="LocalaySectionTitle" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="16"/><Setter Property="FontWeight" Value="Medium"/>
+        <Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+    </Style>
+    <Style x:Key="LocalayCategory" TargetType="TabItem">
+        <Setter Property="MinWidth" Value="200"/><Setter Property="Padding" Value="16,12"/>
+        <Setter Property="HeaderTemplate"><Setter.Value><DataTemplate>
+            <TextBlock Text="{Binding}" TextWrapping="Wrap" MaxWidth="168"/>
+        </DataTemplate></Setter.Value></Setter>
+        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        <Setter Property="Background" Value="Transparent"/>
+        <Setter Property="FocusVisualStyle" Value="{StaticResource LocalayFocus}"/>
+        <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="TabItem">
+            <Border x:Name="row" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="3,0,0,0" CornerRadius="6" Padding="{TemplateBinding Padding}" Margin="4,2">
+                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" HorizontalAlignment="Left"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="row" Property="Background" Value="{DynamicResource Surface2Brush}"/></Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter TargetName="row" Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                    <Setter TargetName="row" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate></Setter.Value></Setter>
     </Style>
     </Application.Resources>
 </Application>

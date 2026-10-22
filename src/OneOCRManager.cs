@@ -371,7 +371,7 @@ namespace AlpWareStudio.Localay
         }
 
         // Get OCR lines from bitmap
-        public async Task<List<Line>> GetOcrLinesFromBitmapAsync(System.Drawing.Bitmap bitmap)
+        public async Task<List<Line>> GetOcrLinesFromBitmapAsync(System.Drawing.Bitmap bitmap, bool? preprocessing = null)
         {
             await InitializeAsync();
             
@@ -384,45 +384,38 @@ namespace AlpWareStudio.Localay
             try
             {
                 // Convert the image format to BGRA with optional preprocessing
-                bool enablePreprocessing = ConfigManager.Instance.IsHDRSupportEnabled();
+                bool enablePreprocessing = preprocessing ?? ConfigManager.Instance.IsHDRSupportEnabled();
                 Bitmap sourceImage = enablePreprocessing ? PreprocessBitmapForOCR(bitmap) : bitmap;
 
                 try
                 {
-                    using (Bitmap imgRgba = new Bitmap(sourceImage.Width, sourceImage.Height, PixelFormat.Format32bppArgb))
+                    // WGC/GDI already produce BGRA pixels. Draw only when conversion
+                    // is actually needed, and always release the lock if native OCR fails.
+                    using Bitmap? converted = sourceImage.PixelFormat == PixelFormat.Format32bppArgb
+                        ? null : sourceImage.Clone(new Rectangle(0, 0, sourceImage.Width, sourceImage.Height), PixelFormat.Format32bppArgb);
+                    Bitmap input = converted ?? sourceImage;
+                    Bitmap? topDown = null;
+                    BitmapData? data = null;
+                    try
                     {
-                        using (Graphics g = Graphics.FromImage(imgRgba))
+                        data = input.LockBits(new Rectangle(0, 0, input.Width, input.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                        if (data.Stride <= 0)
                         {
-                            g.DrawImage(sourceImage, 0, 0);
+                            input.UnlockBits(data); data = null;
+                            topDown = new Bitmap(input.Width, input.Height, PixelFormat.Format32bppArgb);
+                            using (var graphics = Graphics.FromImage(topDown)) graphics.DrawImageUnscaled(input, 0, 0);
+                            input = topDown;
+                            data = input.LockBits(new Rectangle(0, 0, input.Width, input.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
                         }
-
-                        int rows = imgRgba.Height;
-                        int cols = imgRgba.Width;
-                        int step = System.Drawing.Image.GetPixelFormatSize(imgRgba.PixelFormat) / 8 * cols;
-
-                        // Get pixel data
-                        BitmapData bitmapData = imgRgba.LockBits(
-                            new Rectangle(0, 0, imgRgba.Width, imgRgba.Height), 
-                            ImageLockMode.ReadOnly, 
-                            imgRgba.PixelFormat);
-                        
-                        IntPtr dataPtr = bitmapData.Scan0;
-
-                        // Create an instance of the Img structure
-                        Img formattedImage = new Img
-                        {
-                            t = 3,
-                            col = cols,
-                            row = rows,
-                            _unk = 0,
-                            step = step,
-                            data_ptr = dataPtr
-                        };
-
-                        // Execute OCR processing
-                        Line[]? result = RunOcr(formattedImage);
-                        imgRgba.UnlockBits(bitmapData);
-                        return result != null ? result.ToList() : new List<Line>();
+                        var image = new Img { t = 3, col = input.Width, row = input.Height, _unk = 0,
+                            step = data.Stride, data_ptr = data.Scan0 };
+                        var result = RunOcr(image);
+                        return result?.ToList() ?? new List<Line>();
+                    }
+                    finally
+                    {
+                        if (data != null) input.UnlockBits(data);
+                        topDown?.Dispose();
                     }
                 }
                 finally
@@ -546,7 +539,7 @@ namespace AlpWareStudio.Localay
         }
 
         // Process OneOCR results
-        public Task ProcessOneOcrResults(List<Line> textLines, string languageCode = "en", Bitmap? sourceBitmap = null)
+        public Task ProcessOneOcrResults(List<Line> textLines, string languageCode = "en", Bitmap? sourceBitmap = null, Func<bool>? canProcess = null, Action<string>? receiveResults = null)
         {
             try
             {
@@ -709,7 +702,6 @@ namespace AlpWareStudio.Localay
                 {
                     status = "success",
                     results = results,
-                    processing_time_seconds = 0.1,
                     char_level = useCharacterLevel // Indicate this is character-level data
                 };
 
@@ -722,8 +714,14 @@ namespace AlpWareStudio.Localay
                 string jsonResponse = JsonSerializer.Serialize(response, jsonOptions);
 
                 // Process the JSON response on the UI thread to handle STA requirements
+                var timing = PipelineDiagnostics.Current;
+                using var queueTiming = timing?.Measure(PipelineWork.DispatcherQueue);
                 Application.Current.Dispatcher.Invoke((Action)(() => {
-                    Logic.Instance.ProcessReceivedTextJsonData(jsonResponse);
+                    queueTiming?.Dispose();
+                    using var timingScope = PipelineDiagnostics.Use(timing);
+                    if (canProcess != null && !canProcess()) return;
+                    if (receiveResults != null) receiveResults(jsonResponse);
+                    else Logic.Instance.ProcessReceivedTextJsonData(jsonResponse);
                 }));
             }
             catch (Exception ex)

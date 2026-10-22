@@ -70,6 +70,47 @@ namespace AlpWareStudio.Localay
 
         // Settle time is stored in ConfigManager, no need for a local variable
 
+        // Visibility queries must not create a new overlay while another window is closing.
+        internal static bool IsResultSurfaceVisible => _instance != null && _instance.IsVisible &&
+            _instance.WindowState != WindowState.Minimized &&
+            _instance.imageScrollViewer.Visibility == Visibility.Visible;
+
+        internal static void ApplyCapturePreferencesIfCreated(CapturePreferenceValues values)
+        {
+            var window = _instance;
+            if (window == null) return;
+            bool initializing = _isInitializing;
+            _isInitializing = true;
+            try
+            {
+                window.ocrMethodComboBox.SelectedItem = window.ocrMethodComboBox.Items.OfType<System.Windows.Controls.ComboBoxItem>()
+                    .FirstOrDefault(item => item.Content?.ToString() == values.OcrMethod);
+                window.autoTranslateCheckBox.IsChecked = values.AutoTranslate;
+            }
+            finally { _isInitializing = initializing; }
+        }
+
+        internal static void RefreshAdvancedPreferencesIfCreated()
+        {
+            var window = _instance;
+            if (window == null) return;
+            bool initializing = _isInitializing;
+            _isInitializing = true;
+            try
+            {
+                window.blockDetectionPowerTextBox.Text = ConfigManager.Instance.GetBlockDetectionScale().ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            finally { _isInitializing = initializing; }
+        }
+
+        internal static void RefreshResultAppearanceIfCreated()
+        {
+            var window = _instance;
+            if (window == null) return;
+            if (!ConfigManager.Instance.IsShowIconSignalEnabled()) window.HideTranslationStatus();
+            window.RefreshOverlays();
+        }
+
         public MonitorWindow()
         {
             // Make sure the initialization flag is set before anything else
@@ -77,6 +118,9 @@ namespace AlpWareStudio.Localay
             Console.WriteLine("MonitorWindow constructor: Setting _isInitializing to true");
 
             InitializeComponent();
+            IsVisibleChanged += (_, _) => MainWindow.NotifyResultSurfaceChanged();
+            StateChanged += (_, _) => MainWindow.NotifyResultSurfaceChanged();
+            imageScrollViewer.IsVisibleChanged += (_, _) => MainWindow.NotifyResultSurfaceChanged();
             foreach (var item in ocrMethodComboBox.Items.OfType<System.Windows.Controls.ComboBoxItem>())
                 if (item.Content?.ToString() == "OneOCR") item.IsEnabled = NativeOcrAssets.IsAvailable;
 
@@ -101,6 +145,10 @@ namespace AlpWareStudio.Localay
             {
                 TextObject.ClearCache();
                 RefreshOverlays();
+            };
+            this.SizeChanged += (_, _) =>
+            {
+                if (IsLoaded && ReferenceEquals(_instance, this)) RefreshOverlays();
             };
 
             // Add size changed handler to update scrollbars
@@ -241,6 +289,7 @@ namespace AlpWareStudio.Localay
         // Auto Translate Checkbox Changed
         private void AutoTranslateCheckBox_CheckedChanged(object sender, RoutedEventArgs e)
         {
+            if (_isInitializing) return;
             bool isAutoTranslateEnabled = autoTranslateCheckBox.IsChecked ?? false;
             
             Console.WriteLine($"Auto-translate {(isAutoTranslateEnabled ? "enabled" : "disabled")}");
@@ -353,6 +402,7 @@ namespace AlpWareStudio.Localay
             //     autoTranslateCheckBox.Unchecked += AutoTranslateCheckBox_CheckedChanged;
 
             GetDpiScale();
+            if (ReferenceEquals(_instance, this)) RefreshOverlays();
             // }
             
             Console.WriteLine("MonitorWindow initialization complete");
@@ -492,7 +542,7 @@ namespace AlpWareStudio.Localay
         {
             try
             {
-                if (!Logic.Instance.AreOverlaysCurrent) return;
+                if (textObject == null || !textObject.SourceFrameCurrent || !textObject.LayoutAdmitted) return;
                 // Check for null references
                 if (textObject == null || textOverlayCanvas == null)
                 {
@@ -520,11 +570,11 @@ namespace AlpWareStudio.Localay
                     textObject.Border.Margin = new Thickness(0);
                     
                     // Position the element on the canvas using Canvas.SetLeft/Top
-                    Canvas.SetLeft(textObject.Border, textObject.X);
-                    Canvas.SetTop(textObject.Border, textObject.Y);
+                    // Placement was prepared by ResolveOverlayCollisions before attachment.
 
-                    // Add to canvas
-                    textOverlayCanvas.Children.Add(textObject.Border);
+                    // Keep unchanged visuals attached; only new/replaced borders enter the canvas.
+                    if (textObject.Border.Parent == null) textOverlayCanvas.Children.Add(textObject.Border);
+                    textObject.Border.Visibility = Visibility.Visible;
                     textObject.Border.IsHitTestVisible = false;
                 }
                 else
@@ -590,17 +640,11 @@ namespace AlpWareStudio.Localay
                 }
                 
                 // Now we're on the UI thread, safe to update UI elements
+                var timing = Logic.Instance.SceneTiming;
+                using var uiTiming = timing?.Measure(PipelineWork.UiApply);
                 
-                // Clear canvas
-                textOverlayCanvas.Children.Clear();
 
-                // A response for the previous screen must not bring its boxes/backgrounds back.
-                if (!Logic.Instance.AreOverlaysCurrent)
-                {
-                    DrawExcludeRegions();
-                    return;
-                }
-                
+                // Individual invalid patches stay hidden; unrelated stationary blocks remain visible.
                 // Check if Logic is initialized
                 if (Logic.Instance == null)
                 {
@@ -616,17 +660,41 @@ namespace AlpWareStudio.Localay
                 }
                 
                 DpiHelper.GetWindowRenderDpi(this, out double renderScaleX, out double renderScaleY);
-                // Re-add all current text objects, converting original pixels at the current DPI.
-                foreach (TextObject textObj in textObjects)
+                foreach (var text in textObjects)
                 {
-                    if (textObj != null)
+                    text.ApplyRenderDpi(renderScaleX, renderScaleY);
+                    // Inherit the real WPF DPI before fitting a new visual. Hidden
+                    // borders can be measured but cannot expose an intermediate layout.
+                    if (text.SourceFrameCurrent && text.Border.Parent == null)
                     {
-                        textObj.ApplyRenderDpi(renderScaleX, renderScaleY);
-                        CreateMonitorOverlayFromTextObject(this, textObj);
+                        text.Border.Visibility = Visibility.Hidden;
+                        textOverlayCanvas.Children.Add(text.Border);
                     }
                 }
-
                 ResolveOverlayCollisions(textObjects);
+                var visibleObjects = textObjects.Where(t => t.SourceFrameCurrent && t.LayoutAdmitted).ToArray();
+                var desired = new HashSet<System.Windows.UIElement>();
+                foreach (var text in visibleObjects)
+                {
+                    desired.Add(text.Border);
+                    if (text.EraserElement != null) desired.Add(text.EraserElement);
+                }
+                // Remove obsolete borders and patches together. Unchanged UI elements
+                // retain their parent, layout and background; no clear/re-add frame.
+                foreach (var child in textOverlayCanvas.Children.Cast<System.Windows.UIElement>().ToArray())
+                    if (!desired.Contains(child)) textOverlayCanvas.Children.Remove(child);
+                foreach (var text in visibleObjects) CreateMonitorOverlayFromTextObject(this, text);
+
+                if (timing != null && !timing.IsFinished)
+                {
+                    int translated = textObjects.Count(t => !string.IsNullOrWhiteSpace(t.TextTranslated));
+                    int visible = textOverlayCanvas.IsVisible && WindowState != WindowState.Minimized ? textObjects.Count(t =>
+                        !string.IsNullOrWhiteSpace(t.TextTranslated) && t.Border.IsVisible &&
+                        ReferenceEquals(t.Border.Parent, textOverlayCanvas)) : 0;
+                    timing.SetCoverage(textObjects.Count, translated, visible);
+                    if (textObjects.Count > 0 && visible == textObjects.Count)
+                        timing.Mark(PipelineStage.UiApplied);
+                }
 
                 // Draw exclude regions if enabled
                 DrawExcludeRegions();
@@ -636,116 +704,37 @@ namespace AlpWareStudio.Localay
             }
             catch (Exception ex)
             {
+                // A failed preparation must never leave stale eraser pixels behind.
+                textOverlayCanvas?.Children.Clear();
                 Console.WriteLine($"Error refreshing overlays: {ex.Message}");
             }
         }
 
-        // Space kept between overlay boxes when widening or pushing them apart
-        private const double OverlayGap = 2;
-        // Last-resort minimum font size (fraction of the source size) for boxes pushed past the bottom edge
-        private const double LastResortMinSourceSizeRatio = 0.4;
-
-        // Translations that overflow their original box would cover the boxes below them, and the
-        // backgrounds are opaque. Widen overflowing boxes into free space along the reading direction
-        // (right for LTR, left for RTL, which stays anchored to its original right edge), then push
-        // overlapping boxes down top-to-bottom, and as a last resort shrink boxes that leave the overlay.
+        // Fit at the source anchor: widen into known free space, then shrink once
+        // to the readable floor. An impossible fit keeps both its patch and border hidden.
         private void ResolveOverlayCollisions(IReadOnlyList<TextObject> textObjects)
         {
-            try
+            foreach (var text in textObjects) text.LayoutAdmitted = false;
+            var sources = textObjects.Where(t => t.SourceFrameCurrent && t.Width > 0 && t.Height > 0).ToArray();
+            var boxes = sources.Select(t => new OverlayBox(t.X, t.Y, t.Width, t.Height)).ToArray();
+            var directions = sources.Select(t => t.FlowDirection == System.Windows.FlowDirection.RightToLeft).ToArray();
+            double width = ActualWidth, height = ActualHeight;
+            bool translate = MainWindow.Instance.GetTranslateEnabled();
+            for (int i = 0; i < sources.Length; i++)
             {
-                var items = textObjects
-                    .Where(t => t != null && t.TextBlock != null && t.Width > 0 && t.Height > 0
-                                && ReferenceEquals(t.Border.Parent, textOverlayCanvas))
-                    .OrderBy(t => t.Y).ThenBy(t => t.X)
-                    .ToList();
-                if (items.Count == 0) return;
-
-                double overlayWidth = ActualWidth > 0 ? ActualWidth : double.PositiveInfinity;
-                double overlayHeight = ActualHeight > 0 ? ActualHeight : double.PositiveInfinity;
-
-                // Widen: let an overflowing box grow until the next box on the same rows or the overlay edge
-                foreach (var item in items)
-                {
-                    item.Relayout(item.Width, TextObject.DefaultMinSourceSizeRatio);
-                    if (item.TextFitsBox) continue;
-
-                    bool isRtl = item.FlowDirection == System.Windows.FlowDirection.RightToLeft;
-                    double right = isRtl ? item.X + item.Width : overlayWidth;
-                    double left = isRtl ? 0 : item.X;
-                    foreach (var other in items)
-                    {
-                        bool sharesRows = other.Y < item.Y + item.Height && other.Y + other.Height > item.Y;
-                        if (other == item || !sharesRows) continue;
-
-                        if (!isRtl && other.X >= item.X + item.Width)
-                        {
-                            right = Math.Min(right, other.X);
-                        }
-                        else if (isRtl && other.X + other.Width <= item.X)
-                        {
-                            left = Math.Max(left, other.X + other.Width);
-                        }
-                    }
-
-                    double availableWidth = isRtl ? right - (left + OverlayGap) : right - OverlayGap - left;
-                    if (!double.IsInfinity(availableWidth) && availableWidth > item.Width)
-                    {
-                        item.Relayout(availableWidth, TextObject.DefaultMinSourceSizeRatio);
-                    }
-                }
-
-                // Push down: place boxes top-to-bottom, moving each below any placed box it would overlap
-                var placed = new List<Rect>();
-                foreach (var item in items)
-                {
-                    Rect box = PlaceBelowOverlaps(item, placed);
-
-                    if (box.Bottom > overlayHeight)
-                    {
-                        item.Relayout(item.LayoutWidth, LastResortMinSourceSizeRatio, allowShrink: true);
-                        box = PlaceBelowOverlaps(item, placed);
-                    }
-
-                    Canvas.SetLeft(item.Border, box.Left);
-                    Canvas.SetTop(item.Border, box.Top);
-                    placed.Add(box);
-                }
+                var text = sources[i];
+                if (text.TextBlock == null || (translate && string.IsNullOrWhiteSpace(text.TextTranslated))) continue;
+                bool rtl = text.FlowDirection == System.Windows.FlowDirection.RightToLeft;
+                double available = OverlayPlacementPolicy.AvailableWidth(i, boxes, width, rtl, directions);
+                text.FitForAvailableWidth(available);
+                if (!text.TextFitsBox) continue;
+                text.Border.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
+                var measured = text.Border.DesiredSize;
+                var placement = OverlayPlacementPolicy.Anchor(boxes[i], measured.Width, measured.Height, rtl);
+                if (!OverlayPlacementPolicy.CanPresent(i, boxes, placement, width, height)) continue;
+                Canvas.SetLeft(text.Border, placement.X); Canvas.SetTop(text.Border, placement.Y);
+                text.LayoutAdmitted = true;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Error resolving overlay collisions: {ex.Message}");
-            }
-        }
-
-        private static Rect PlaceBelowOverlaps(TextObject item, List<Rect> placed)
-        {
-            item.Border.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
-            System.Windows.Size size = item.Border.DesiredSize;
-            double top = item.Y;
-            // RTL boxes grow leftward, so keep their right edge on the original text's right edge
-            double left = item.FlowDirection == System.Windows.FlowDirection.RightToLeft
-                ? item.X + item.Width - size.Width
-                : item.X;
-
-            // Each move can create a new overlap with another placed box, so repeat until clear
-            bool moved = true;
-            while (moved)
-            {
-                moved = false;
-                foreach (Rect other in placed)
-                {
-                    bool overlapsX = left < other.Right && left + size.Width > other.Left;
-                    // Ignore slivers: adjacent OCR line boxes often overlap by a pixel or two
-                    bool overlapsY = top < other.Bottom - OverlayGap && top + size.Height > other.Top + OverlayGap;
-                    if (overlapsX && overlapsY)
-                    {
-                        top = other.Bottom + OverlayGap;
-                        moved = true;
-                    }
-                }
-            }
-
-            return new Rect(left, top, size.Width, size.Height);
         }
 
         // Draw exclude regions on the overlay

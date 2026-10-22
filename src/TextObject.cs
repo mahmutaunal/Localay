@@ -46,6 +46,7 @@ namespace AlpWareStudio.Localay
         // Properties
         public string Text { get; set; }
         public string ID { get; set; } = Guid.NewGuid().ToString();  // Initialize with a unique ID
+        internal string? TranslationContext { get; set; }
         public string TextTranslated { get; set; } = string.Empty;  // Initialize with empty string
         public double X { get; set; }
         public double Y { get; set; }
@@ -67,6 +68,44 @@ namespace AlpWareStudio.Localay
         public double MinSourceSizeRatio { get; private set; } = DefaultMinSourceSizeRatio;
         // Whether the text fit the original box height at the chosen font size
         public bool TextFitsBox { get; private set; } = true;
+
+        // Sticky until fresh OCR rebuilds this patch; an old translation cannot re-enable it.
+        internal bool SourceFrameCurrent { get; set; } = true;
+        internal bool LayoutAdmitted { get; set; }
+        private readonly record struct RenderState(string Text, System.Windows.FlowDirection Direction, Color Foreground, Color Background,
+            double X, double Y, double Width, double Height, double LineHeight, double ScaleX, double ScaleY,
+            OverlayTextOptions Options, object? Eraser);
+        private RenderState? _appliedState;
+        private long _contentVersion, _fitVersion = -1;
+        private double _fitWidth;
+        private System.Windows.Media.Effects.DropShadowEffect? _halo;
+
+        internal bool CanReuseSource(OcrSceneBlock source, double lineHeight)
+        {
+            var previous = SourceBlock;
+            return SourceFrameCurrent && _appliedState?.Options == Options && previous.Text == source.Text &&
+                OverlayPlacementPolicy.SameSource(new(previous.X, previous.Y, previous.Width, previous.Height),
+                    new(source.X, source.Y, source.Width, source.Height)) &&
+                Math.Abs(SourceLineHeight * _renderScaleY - lineHeight) <= 2;
+        }
+
+        internal void FitForAvailableWidth(double width)
+        {
+            if (_fitVersion == _contentVersion && _fitWidth == width) return;
+            Relayout(width, DefaultMinSourceSizeRatio);
+            if (!TextFitsBox) Relayout(width, DefaultMinSourceSizeRatio, allowShrink: true);
+            _fitWidth = width;
+            _fitVersion = _contentVersion;
+        }
+        internal OcrSceneBlock SourceBlock => _captureGeometry is { } p
+            ? new(Text, p.X, p.Y, p.Width, p.Height)
+            : new(Text, X * _renderScaleX, Y * _renderScaleY, Width * _renderScaleX, Height * _renderScaleY);
+        internal bool IntersectsCaptureChange(FrameChangeMap changes)
+        {
+            var p = SourceBlock;
+            return changes.Intersects(p.X, p.Y, p.Width, p.Height) ||
+                (_eraserPixelBounds is Rect patch && changes.Intersects(patch.X, patch.Y, patch.Width, patch.Height));
+        }
 
         private OverlayPixelGeometry? _captureGeometry;
         private double _renderScaleX = 1, _renderScaleY = 1;
@@ -151,6 +190,8 @@ namespace AlpWareStudio.Localay
         // Public so it can be used by MonitorWindow
         public UIElement CreateUIElement(bool useRelativePosition = true)
         {
+            _appliedState = null;
+            _fitVersion = -1;
             // Create a border for the background
             Border = new Border()
             {
@@ -207,13 +248,24 @@ namespace AlpWareStudio.Localay
             // Add context menu for right-click options
             // Border.ContextMenu = CreateContextMenu();
 
-            // Scale font if needed after rendering
-            Border.Loaded += (s, e) => AdjustFontSize(Border, TextBlock);
+            // Fit before attaching the visual; Loaded must not resize it a frame later.
+            AdjustFontSize(Border, TextBlock);
 
             return Border;
         }
 
         // Update the UI element with current properties
+        internal void ApplySavedResultAppearance(bool preserveSampledColors)
+        {
+            if (!preserveSampledColors)
+            {
+                TextColor = new SolidColorBrush(ConfigManager.Instance.GetOverlayTextColor());
+                BackgroundColor = new SolidColorBrush(ConfigManager.Instance.GetOverlayBackgroundColor());
+            }
+            if (!ConfigManager.Instance.IsAutoSetOverlayBackground()) EraserElement = null;
+            UpdateUIElement();
+        }
+
         public void UpdateUIElement()
         {
             // Check if we need to run on the UI thread
@@ -223,38 +275,24 @@ namespace AlpWareStudio.Localay
                 return;
             }
 
-            //if TextBox is null, create a new one
-            if (TextBlock == null)
-            {
-                CreateUIElement();
-            }
-
-            if (TextBlock != null && Border != null)
-            {
-                if (this.TextTranslated != null && this.TextTranslated.Length > 0)
-                {
-                    // Use translated text if available
-                    TextBlock.Text = this.TextTranslated;
-                    TextBlock.FlowDirection = FlowDirection;
-                }
-                // else
-                // {
-                //     // Use original text
-                //     TextBlock.Text = this.Text;
-                // }
-                TextBlock.Foreground = this.TextColor;
-                ApplyBackground();
-                // The overlay positions borders with Canvas.Left/Top; a margin would add the offset twice
-                Border.Margin = new Thickness(0);
-                Canvas.SetLeft(Border, X);
-                Canvas.SetTop(Border, Y);
-
-                // New text: start again from the original box; the overlay layout pass re-widens if needed
-                ResetLayout();
-                ApplyBoxConstraints();
-                TextBlock.FontFamily = new FontFamily(Options.FontFamily);
-                AdjustFontSize(Border, TextBlock);
-            }
+            var options = Options;
+            string displayText = string.IsNullOrWhiteSpace(TextTranslated) ? Text : TextTranslated;
+            var state = new RenderState(displayText, FlowDirection, TextColor.Color, BackgroundColor.Color,
+                X, Y, Width, Height, SourceLineHeight, _renderScaleX, _renderScaleY, options, EraserElement);
+            if (TextBlock != null && _appliedState == state) return;
+            if (TextBlock == null) UIElement = CreateUIElement(useRelativePosition: false);
+            TextBlock.Text = displayText;
+            TextBlock.FlowDirection = FlowDirection;
+            TextBlock.Foreground = TextColor;
+            ApplyBackground();
+            Border.Margin = new Thickness(0);
+            Canvas.SetLeft(Border, X); Canvas.SetTop(Border, Y);
+            ResetLayout();
+            ApplyBoxConstraints();
+            if (TextBlock.FontFamily.Source != options.FontFamily) TextBlock.FontFamily = new FontFamily(options.FontFamily);
+            AdjustFontSize(Border, TextBlock);
+            _appliedState = state;
+            _contentVersion++;
         }
 
         // Original background with the source text removed, placed on the overlay under all translations
@@ -300,15 +338,13 @@ namespace AlpWareStudio.Localay
                 _softBackground.Visibility = soft ? Visibility.Visible : Visibility.Collapsed;
             }
 
-            TextBlock.Effect = erased
-                ? new System.Windows.Media.Effects.DropShadowEffect
-                {
-                    Color = BackgroundColor.Color,
-                    ShadowDepth = 0,
-                    BlurRadius = TextHaloRadius,
-                    Opacity = 1
-                }
-                : null;
+            if (erased)
+            {
+                _halo ??= new System.Windows.Media.Effects.DropShadowEffect { ShadowDepth = 0, BlurRadius = TextHaloRadius, Opacity = 1 };
+                _halo.Color = BackgroundColor.Color;
+                TextBlock.Effect = _halo;
+            }
+            else TextBlock.Effect = null;
         }
 
         private void ResetLayout()
@@ -341,6 +377,7 @@ namespace AlpWareStudio.Localay
         public void Relayout(double layoutWidth, double minSourceSizeRatio, bool allowShrink = false)
         {
             if (TextBlock == null) return;
+            _fitVersion = -1;
             LayoutWidth = Math.Max(Width, layoutWidth);
             MinSourceSizeRatio = minSourceSizeRatio;
             _allowFontShrink = allowShrink;

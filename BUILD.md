@@ -12,13 +12,15 @@ dotnet run --project ./tests/SecurityChecks/SecurityChecks.csproj -c Release
 ./Publish-Windows.ps1
 ```
 
-`Publish-Windows.ps1` clears the generated `artifacts/publish` directory, publishes the multi-file .NET application, verifies its standard-user manifest and distribution contents, and produces both the optional portable ZIP and the main per-user setup EXE. It updates Defender signatures and scans the raw payload and both distribution formats, failing if validation cannot complete. Output: `artifacts/package` for the ZIP, `artifacts/installer` for `Localay-<version>-Setup-x64.exe` and checksum. The compiler must be installed and selected with `LOCALAY_ISCC`; GitHub Actions handles this automatically using the hash/signature-verified pinned official compiler. Nothing is signed by this project. See [installer/README.md](installer/README.md) for exact workflow/artifact instructions.
+`Publish-Windows.ps1` clears the generated `artifacts/publish` directory, publishes the multi-file .NET application, verifies its standard-user manifest and distribution contents, and produces both the optional portable ZIP and the main administrator-required setup EXE. It updates Defender signatures and scans the raw payload and both distribution formats, failing if validation cannot complete. Output: `artifacts/package` for the ZIP, `artifacts/installer` for `Localay-<version>-Setup-x64.exe` and checksum. The compiler must be installed and selected with `LOCALAY_ISCC`; GitHub Actions handles this automatically using the hash/signature-verified pinned official compiler. Nothing is signed by this project. See [installer/README.md](installer/README.md) for exact workflow/artifact instructions.
 
-The **Build Windows Installer** GitHub Actions workflow runs only through `workflow_dispatch`. It validates build assets, installer policy and compiler regression cases, installs the pinned compiler, restores locked dependencies, publishes the application, and builds/verifies the setup EXE with its checksum and metadata. It does not run Defender, WPF integration or installer lifecycle checks. No physical Windows machine is required to trigger this from a Mac. Package version and displayed application version come from `Localay.csproj`. Update `global.json` to a serviced .NET 10 SDK and regenerate `packages.lock.json` intentionally when updating dependencies. NuGet vulnerability warnings for direct and transitive dependencies fail the restore/build.
+The **Build Windows Installer** GitHub Actions workflow runs only through `workflow_dispatch`. It validates build assets, installer policy and compiler regression cases, installs the pinned compiler, restores locked dependencies, publishes the application, and builds/verifies the setup EXE with its checksum and metadata. It runs startup isolation and Windows WPF checks, including the actual Settings command with temporary configuration. Defender scanning is optional and off by default; installer lifecycle checks are not run. No physical Windows machine is required to trigger this from a Mac. Package version and displayed application version come from `Localay.csproj`. Update `global.json` to a serviced .NET 10 SDK and regenerate `packages.lock.json` intentionally when updating dependencies. NuGet vulnerability warnings for direct and transitive dependencies fail the restore/build.
 
 The default build uses Windows OCR; install its source-language feature in Windows Settings. OneOCR files are excluded from the standard package. See `SECURITY.md` for optional asset licensing, pinned hashes and signature checks before a custom redistribution.
 
 The Windows TFM supplies SDK projections and WinRT runtime. Do not add CsWinRT projection generation solely to consume Windows APIs.
+
+The manual **Build Windows Installer** workflow keeps Defender scanning optional (`scan_with_defender`, off by default). Enabling it scans the published payload and installer on the disposable hosted runner and uploads separate diagnostics; a failed requested scan prevents the installer artifact from being uploaded. No live installation test is added. Build metadata records the source commit and Actions run/attempt, and the workflow verifies the installer/checksum identity immediately before upload. See [installer/README.md](installer/README.md) for the distinction between antivirus detections and unsigned-download reputation warnings.
 
 ## Cross-platform validation
 
@@ -47,7 +49,7 @@ This check inspects the Windows assembly as data, so it also runs on macOS/Linux
 
 Keep `assets/localay.ico` and `assets/icons/localay-256.png` in version control. The application and installer reference these files directly; the README logo does not replace them. `tests/BuildAssetChecks.ps1` verifies these inputs before compilation and packaging.
 
-Run `./Verify-Project.ps1` in PowerShell 7 for a locked/audited restore, Windows Release build, source/installer policies, security, preferences, OCR scene regressions, localization and product/license checks. On Windows it also runs `tests/UiWindowsChecks`, an STA WPF host that exercises live language changes, production language templates, theme brushes, About and API-key dialogs, and the complete compiled Settings window (all categories, ignore-phrase bindings, hide/reopen and redacted error details). The Settings visual check skips runtime service/profile initialization; actual profile-loading failures and the main-window Settings button still require an interactive Windows check. It does not start Localay's capture loop, create user settings, register hotkeys, or open links. On macOS/Linux that runtime check is explicitly recorded as `not_run`.
+Run `./Verify-Project.ps1` in PowerShell 7 for a locked/audited restore, Windows Release build, source/installer policies, security, preferences, OCR scene regressions, localization and product/license checks. On Windows it also runs `tests/UiWindowsChecks`, an STA WPF host that exercises live language changes, production language templates, theme brushes, About and API-key dialogs, and the complete compiled Settings window (all categories, ignore-phrase bindings, hide/reopen and redacted error details). The markup-only Settings check skips runtime initialization; a separate command check enables full settings/profile loading with temporary configuration and exercises the main-window button and profile failure recovery. Physical capture and foreground/DPI behavior still require an interactive Windows check. It does not start Localay's capture loop, create user settings, register hotkeys, or open links. On macOS/Linux that runtime check is explicitly recorded as `not_run`.
 
 `artifacts/validation/project/summary.json` records passed, failed and not-run steps, with one log per check. Independent checks continue after a failure; the command exits unsuccessfully if any step fails. `-SkipRestore` is for repeated checks with existing restored assets and is explicitly reported as skipping the fresh audit. The manual installer workflow does not invoke this combined validation command or upload these reports; run it separately when that broader validation is required.
 
@@ -78,3 +80,77 @@ Installed regional variants are accepted for the application's generic source-la
 `tests/OcrSetupChecks` covers language matching, capability input validation, launch arguments, exit results, all source choices and dynamic English/Turkish guide messages. `tests/OcrSetupScriptChecks.ps1` parses the generated production command, verifies its command allow-list and runs it against a fake DISM module for install order, idempotency, missing/ambiguous support, pending/restart, errors and non-installation. These checks never execute real Windows servicing. Both are in `Verify-Project.ps1`; the latter requires a PowerShell process without an already-loaded DISM module. The WPF suite adds guide localization, progress/duplicate-click guards, refreshed availability, failure states and closing during a fake operation. On macOS it is compiled only; actual UAC, Windows PowerShell 5.1/DISM, download and post-reboot recognition need Windows acceptance testing. Test on a disposable Windows 11 VM with a non-English display language, including a missing English OCR feature, already-installed Basic, UAC cancellation, restricted/offline Windows Update and Install Pending. Confirm the display language before and after remains unchanged. Do not remove a real user's OCR features just to create this test state.
 
 References: [Microsoft OCR setup guidance](https://learn.microsoft.com/en-us/windows/powertoys/text-extractor), [Basic/OCR dependencies](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/features-on-demand-language-fod?view=windows-11), [Add-WindowsCapability and Windows Update](https://learn.microsoft.com/en-us/powershell/module/dism/add-windowscapability?view=windowsserver2025-ps).
+
+## Startup and Settings lifecycle
+
+`dotnet run --project ./tests/StartupChecks/StartupChecks.csproj -c Release` verifies that a failing optional startup phase reports its original exception and does not skip later phases. `Verify-Project.ps1` includes this portable check.
+
+Language selection and the bound version label are initialized before capture, animation or other optional features. Loaded phases are isolated and logged by name; partial startup shows a localized warning. A repeated Loaded event does not attach the same runtime handlers again.
+
+On Windows, `dotnet run --project ./tests/UiWindowsChecks/UiWindowsChecks.csproj -c Release` also opens the production MainWindow markup and invokes its Settings button against a temporary ConfigManager. The full Settings loading path is enabled. Capture, clipboard monitoring, global hotkeys and welcome prompts are disabled in this host. Checks cover the initial language/version, ownership, ten close/reopen cycles, single field commits after reloads, minimized/hidden/off-screen windows, and recovery from a temporary profile directory conflict. Temporary configuration and subscriptions are cleaned up. This automated check is part of the installer workflow before packaging; it still does not prove physical monitor/DPI behavior, native foreground activation on a user's desktop, or the original reported failure on their machine.
+
+## Translation stop/restart ownership
+
+Each foreground translation owns a unique scene operation ID. Stop, capture/settings resets and observed text changes invalidate that owner before canceling the old pipeline. The busy state is released immediately, so a new request can start even if an old provider ignores cancellation. Only the matching owner may finish the UI status and drain deferred OCR; old dispatcher callbacks also check the scene generation. Presentation-only scene resets do not release a still-valid owner. Completion always releases ownership even if result notification throws.
+
+`OcrSceneChecks` covers cancellation, owner isolation and deferred generations. `LifetimeChecks` combines the production lifetime, scene state and request wrapper in 50 stop/restart cycles with providers that ignore cancellation. Old results and cleanup must not block, release or overwrite new work, consume its OCR or produce a cancellation error. Both checks run before packaging in the Windows installer workflow. The capture timer skips work while stopped; restarting clears hashes and the one-shot latch before rearming OCR. Windows OCR disposes its native SoftwareBitmap after recognition, including missing-engine/error paths. Real screen capture, OS OCR and user interaction still require the final Windows validation.
+
+## Interface preference persistence
+
+Language and theme changes are written to an atomic replacement file before updating the in-memory preference or applying it to the UI. Failure retains the last committed values, reports the existing save error, and synchronizes MainWindow, Settings and Quick Start selectors back to that choice. Unrelated later saves cannot persist a failed selection. The `system` preference remains `system` on disk; resolving a Windows language does not replace it.
+
+Game profile export/import excludes `language_interface`, `theme_mode` and legacy `dark_mode`, in addition to existing private values. Original legacy main settings retain these interface preferences when their credentials are sanitized; imported game profiles do not carry them.
+
+Localization builds a complete dictionary before changing its effective language. Missing, malformed or null language files fall back to English; missing/blank/null individual translations use English values. Binding observers are notified independently so an observer exception cannot revert the dictionary or prevent other windows from updating. Preference snapshots are recorded after applying the language/theme, allowing a failed resource load to be retried on a later refresh.
+
+Run `dotnet run --project ./tests/PreferencePersistenceChecks/PreferencePersistenceChecks.csproj -c Release` for portable persistence, filesystem failure, profile exclusion, resource fallback and observer isolation checks. The Windows WPF suite additionally changes language through MainWindow, Settings and Quick Start, reads the persisted choice with a fresh ConfigManager, and forces an actual configuration-file replacement failure to verify rollback in all three selectors. These use isolated temporary data and a captured save-error reporter. They do not simulate an entire OS/application restart. The portable check is included in combined validation and the installer workflow.
+
+
+## Pipeline timing diagnostics (P0)
+
+The opt-in pipeline recorder tracks capture/OCR, settling, provider work, UI application and partial/failed/canceled outcomes using operation-scoped monotonic clocks. Normal use allocates no detailed traces or report files. Set `LOCALAY_PIPELINE_DIAGNOSTICS=1` before launching Localay; pause/stop exports a bounded, content-free numeric JSON report to the existing Logs directory.
+
+Run `dotnet run --project ./tests/PipelineTimingChecks/PipelineTimingChecks.csproj -c Release` to validate the production timing/ownership helpers and twelve synthetic stage sequences. Repeat with the diagnostics environment variable enabled to exercise asynchronous provider scope and late completion. The default-mode check is included in `Verify-Project.ps1`. Use `--report <path>` to export synthetic samples, `--replay <report.json>` to recompute statistics, or `--benchmark` to measure recorder overhead only. See [the timing guide](tests/PipelineTimingChecks/README.md) for exact commands and report definitions.
+
+The optimization target is now preferably below 100 ms with preserved quality and low resource usage. P0 does not change capture frequency or select a translation model. Its live interval starts at the application's capture entry and ends at logical WPF application, not at source appearance or physical screen presentation. Those endpoints and semantic correctness are explicitly marked `not_measured`; synthetic replay and cross-compilation do not establish Windows OCR/display latency.
+
+
+## Capture frame ownership (P1)
+
+WGC arrival keeps one newest native frame and releases superseded pending surfaces without per-event bitmap conversion. A bounded drain uses the native pool capacity. Capture/OCR is single-flight; the capturing caller keeps both the original bitmap and any masked copy alive until awaited OCR/result processing finishes. OCR no longer disposes its caller's image. Blocking OCR preprocessing runs off the UI thread; result handling retains the existing UI/session guards. Static, settled WGC frames avoid repeated cached-image clones except when settling/retry/periodic recheck needs them.
+
+The existing `LifetimeChecks` executable covers frame replacement, ownership transfer, shutdown, bounded draining and capture gate isolation. No new installer workflow tests were added; the P0-only additions were removed at the user's request. Local Windows cross-builds and physical Windows testing are not part of this workflow; Windows builds stay in the existing GitHub Actions pipeline. These portable checks verify ownership/concurrency contracts, not measured screen latency.
+
+
+### Regional freshness and block matching (P2)
+
+The existing capture path now observes RGB changes while one native OCR operation is in flight. Each input keeps a bounded tile damage map; stale OCR regions and their background patches cannot be presented by a late response. Stationary blocks can remain visible. Exact-text block matching preserves identities across OCR ordering changes; repeated labels require corroborated, unambiguous movement. Unknown response IDs are no longer treated as list positions.
+
+Active WGC freshness polling uses a 33 ms timer; cached settling/retry observations and GDI retain a 250 ms cadence. This is a polling interval, not a measured OCR/translation/presentation latency. Regional OCR and rendering cost remain later plan items.
+
+Focused validation uses the existing projects, with no new workflow steps or dependencies:
+
+```sh
+dotnet run --project tests/OcrSceneChecks/OcrSceneChecks.csproj -c Release --no-restore
+dotnet run --project tests/LifetimeChecks/LifetimeChecks.csproj -c Release --no-restore
+```
+
+P2 results: 66 scene checks and 34 lifetime checks passed. No downloads or local Windows builds were performed.
+
+
+### Missing-block translation and shared requests (P3)
+
+Screen foreground/prefetch translation now share per-context source units. Already translated objects are retained; only missing units use ID-tagged batches (maximum 15 units per provider call, one actual call at a time, 256 pending units). Reply ownership is validated by requested IDs and optional original source metadata. Normal screen translation no longer packs the scene into ID `999` with application separators. Yandex/Microsoft use their array APIs for the new protocol; literal separators inside a source block remain content.
+
+Google keeps its 1000 ms dispatch spacing and server cooldown. Canceled waiting calls do not reserve future dispatch slots. Managed screen batches use sequential configured fallback rather than speculative parallel fallback; a slow Google request may therefore reach fallback later than the previous 1.5-second hedge.
+
+Relevant portable checks are shared by the existing `LifetimeChecks` and `TranslationResilienceChecks` projects. No workflow steps or packages were added. This session could validate XML/source paths and whitespace, but could not execute C# checks: the previously temporary .NET SDK is absent. No SDK download or local Windows build was attempted. P3 test/compilation status remains **not run**, and no end-to-end latency result is claimed.
+
+
+### Stable rendering and OCR resource reuse (P4)
+
+Windows OCR reuses its language engine and pixel buffer, moving preprocessed BGRA pixels directly into SoftwareBitmap rather than encoding/decoding BMP. WGC retains one staging texture per active size/format; OneOCR avoids a redundant BGRA redraw and releases image locks on failure.
+
+OCR visuals are prepared as a set, unchanged source visuals can retain their Border/eraser, and normal refresh no longer clears/re-adds the canvas. New visuals are fitted with the real WPF DPI while hidden. Placement preserves source anchors and protects neighboring source boxes; it no longer pushes translations down. Unreadable/overlapping fits leave the original source visible and keep their full translation in ChatBox. Known neighboring text is excluded from eraser mask growth.
+
+Portable resource/placement/mask checks share the existing LifetimeChecks/OverlayLayoutChecks projects; focused WPF reuse checks extend UiWindowsChecks. No workflow step or dependency was added. XML/source paths and whitespace checks passed. Runtime/compiler checks remain **not run** because the local .NET SDK is absent. Regional cropped OCR remains disabled pending boundary/composition/quality validation; no measured latency improvement is claimed.
