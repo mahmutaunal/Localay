@@ -381,6 +381,22 @@
                             </Grid>
                         </GroupBox>
                         <TextBlock x:Name="serviceKeysSummaryText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12" />
+                        <Border Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,16">
+                            <StackPanel>
+                                <TextBlock x:Name="gameEngineNameText" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="gameEngineHelpText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,14" />
+                                <TextBlock x:Name="gameOllamaInstallLink" Margin="0,0,0,14" Visibility="Collapsed">
+                                    <Hyperlink Click="OllamaDownloadLink_Click"><Run Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_DownloadOllama]}" /></Hyperlink>
+                                </TextBlock>
+                                <WrapPanel>
+                                    <Button x:Name="useGameAiButton" Click="UseGameAi_Click" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_UseGameAi]}" Margin="0,0,8,8" />
+                                    <Button x:Name="useGameWebButton" Click="UseGameWeb_Click" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_UseGameWeb]}" Margin="0,0,8,8" />
+                                    <Button x:Name="gameModelDownloadButton" Click="TestModelButton_Click" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_PrepareGameModel]}" Visibility="Collapsed" Margin="0,0,0,8" />
+                                </WrapPanel>
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_GameEngineSaveHint]}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="12" />
+                            </StackPanel>
+                        </Border>
+                        <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_GameConnectionDetails]}" IsExpanded="False" Margin="0,0,0,16">
                         <GroupBox Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Grp_TranslationService]}" Margin="0,0,0,15" Padding="10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -403,7 +419,9 @@
                                 <ComboBox x:Name="translationServiceComboBox" Grid.Row="0" Grid.Column="1" Margin="0,5" SelectedIndex="0" SelectionChanged="TranslationServiceComboBox_SelectionChanged">
                                     <ComboBoxItem Content="Gemini" />
                                     <ComboBoxItem Content="Groq" />
-                                    <ComboBoxItem Content="Ollama" />
+                                    <ComboBoxItem Content="Ollama">
+                                        <ComboBoxItem.ContentTemplate><DataTemplate><TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_EngineLocal]}" /></DataTemplate></ComboBoxItem.ContentTemplate>
+                                    </ComboBoxItem>
                                     <ComboBoxItem Content="Marian (local)">
                                         <ComboBoxItem.ContentTemplate>
                                             <DataTemplate>
@@ -413,7 +431,9 @@
                                     </ComboBoxItem>
                                     <ComboBoxItem Content="ChatGPT" />
                                     <ComboBoxItem Content="Mistral" />
-                                    <ComboBoxItem Content="Google Translate" />
+                                    <ComboBoxItem Content="Google Translate">
+                                        <ComboBoxItem.ContentTemplate><DataTemplate><TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_EngineWeb]}" /></DataTemplate></ComboBoxItem.ContentTemplate>
+                                    </ComboBoxItem>
                                     <ComboBoxItem Content="Yandex" />
                                     <ComboBoxItem Content="LM Studio" />
                                     <ComboBoxItem Content="Microsoft" />
@@ -580,7 +600,7 @@
                                         <ColumnDefinition Width="*" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <TextBox x:Name="ollamaModelTextBox" Grid.Column="0" Text="llama3" TextChanged="OllamaModelTextBox_TextChanged" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tip_CommonModels]}" />
+                                    <TextBox x:Name="ollamaModelTextBox" Grid.Column="0" TextChanged="OllamaModelTextBox_TextChanged" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tip_OllamaModel]}" />
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                                         <Button x:Name="testModelButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_TestDownload]}" Margin="5,0,5,0" Padding="5,0" Click="TestModelButton_Click" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tip_TestDownload]}" />
                                         <Button x:Name="viewModelsButton" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_ViewModels]}" Margin="0,0,0,0" Padding="5,0" Click="ViewModelsButton_Click" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Tip_OllamaModels]}" />
@@ -664,7 +684,7 @@
                                             </DataTemplate>
                                         </ComboBoxItem.ContentTemplate>
                                     </ComboBoxItem>
-                                    <ComboBoxItem Content="Cloud API (paid)">
+                                    <ComboBoxItem Content="Cloud API (paid)" IsEnabled="False">
                                         <ComboBoxItem.ContentTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Google_CloudService]}" />
@@ -721,6 +741,7 @@
                                 </Expander>
                             </Grid>
                         </GroupBox>
+                        </Expander>
                     </StackPanel>
                 </ScrollViewer>
                     <Border Grid.Row="1" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="20,16">
@@ -801,14 +822,14 @@
                     <StackPanel Margin="20,16,20,12">
                         <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultPreviewTitle]}" FontWeight="SemiBold" Margin="0,0,0,8" />
                         <Grid>
-                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="12" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="0" /><ColumnDefinition Width="0" /></Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Overlay]}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
+                                <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Settings_GameOverlay]}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
                                 <Border x:Name="overlayPreviewSurface" CornerRadius="8" Padding="16" MinHeight="88" MaxHeight="132" ClipToBounds="True" Background="#FF000000">
                                     <TextBlock x:Name="overlayPreviewText" Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultSampleTranslation]}" Foreground="White" TextWrapping="Wrap" FontSize="24" VerticalAlignment="Center" />
                                 </Border>
                             </StackPanel>
-                            <StackPanel Grid.Column="2">
+                            <StackPanel Grid.Column="2" Visibility="Collapsed">
                                 <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_ChatBox]}" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,6" />
                                 <Border x:Name="chatPreviewSurface" CornerRadius="8" Padding="8" MinHeight="88" MaxHeight="132" ClipToBounds="True" Background="#80000000">
                                     <Border x:Name="chatPreviewTextSurface" Padding="8" Background="#80000000">
@@ -831,13 +852,13 @@
                                     <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultOverlayHint]}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
                                 </StackPanel>
                             </Expander>
-                            <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[ChatBoxOptions_Title]}" IsExpanded="True" Margin="0,0,0,16">
+                            <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[ChatBoxOptions_Title]}" Visibility="Collapsed" IsExpanded="False" Margin="0,0,0,16">
                                 <StackPanel x:Name="resultChatForm" Margin="0,16,0,0" />
                             </Expander>
                             <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultOverlayBehavior]}" Margin="0,0,0,16">
                                 <StackPanel x:Name="resultOverlayBehaviorForm" Margin="0,16,0,0" />
                             </Expander>
-                            <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultHistoryBehavior]}" Margin="0,0,0,16">
+                            <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultHistoryBehavior]}" Visibility="Collapsed" Margin="0,0,0,16">
                                 <StackPanel Margin="0,16,0,0">
                                     <StackPanel x:Name="resultChatBehaviorForm" />
                                     <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Draft_ResultHistoryHint]}" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" />
@@ -1024,7 +1045,7 @@
                             </GroupBox>
                         </Expander>
                         <Expander Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Grp_ContextSettings]}" IsExpanded="False" Margin="0,6,0,14">
-                            <GroupBox Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Grp_ContextSettings]}" Margin="0,0,0,15" Padding="10">
+                            <GroupBox Visibility="Collapsed" Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Grp_ContextSettings]}" Margin="0,0,0,15" Padding="10">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="200" />

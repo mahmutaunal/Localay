@@ -12,7 +12,7 @@ internal sealed class ServicePreferenceDraft
         ["groq_model"] = "moonshotai/kimi-k2-instruct-0905", ["mistral_model"] = "open-mistral-nemo",
         ["chatgpt_model"] = "gpt-3.5-turbo", ["custom_api_url"] = "",
         ["custom_api_model"] = "", ["ollama_url"] = "http://localhost", ["ollama_port"] = "11434",
-        ["ollama_model"] = "llama3", ["ollama_temperature"] = "0.1", ["ollama_top_p"] = "0.9", ["ollama_top_k"] = "40",
+        ["ollama_model"] = HyMt2Profile.Model, ["ollama_temperature"] = "0.1", ["ollama_top_p"] = "0.9", ["ollama_top_k"] = "40",
         ["lm_studio_url"] = "http://localhost", ["lm_studio_port"] = "1234", ["lm_studio_model"] = "google/gemma-3-4b",
         ["google_translate_use_cloud_api"] = "false", ["google_translate_auto_map_languages"] = "true",
         ["google_free_fallback_service"] = "Microsoft", ["microsoft_legacy_signature_mode"] = "true"
@@ -45,6 +45,16 @@ internal sealed class ServicePreferenceDraft
         _values[key] = value;
     }
     internal void SetPendingKey(string service, string text) => _pendingKeys[service] = text.Trim();
+    internal void SelectGameEngine(bool localAi)
+    {
+        Set("translation_service", localAi ? "Ollama" : "Google Translate");
+        if (localAi) Set("ollama_model", HyMt2Profile.Model);
+        else
+        {
+            Set("google_translate_use_cloud_api", "false");
+            Set("google_translate_auto_map_languages", "true");
+        }
+    }
     internal string PendingKey(string service) => _pendingKeys.GetValueOrDefault(service, "");
     internal List<string> Keys(string service) => KeyPrefixes.TryGetValue(service, out string? prefix)
         ? this[prefix + "_api_keys"].Split("+++", StringSplitOptions.RemoveEmptyEntries).ToList() : [];
@@ -104,7 +114,8 @@ internal sealed class ServicePreferenceDraft
         if ((service == "Custom API" || Edited("custom_api_url")) &&
             (!Uri.TryCreate(Get("custom_api_url").Trim(), UriKind.Absolute, out var custom) || custom.Scheme is not ("http" or "https") || custom.UserInfo.Length != 0))
             return "Draft_ServiceUrlInvalid";
-        if ((service == "Ollama" || Edited("ollama_")) && (!double.TryParse(Get("ollama_temperature"), NumberStyles.Float, CultureInfo.InvariantCulture, out double temperature) || !double.IsFinite(temperature) || temperature < 0 || temperature > 2 ||
+        bool fixedLocal = HyMt2Profile.IsSelected(service, Get("ollama_model"));
+        if (!fixedLocal && (service == "Ollama" || Edited("ollama_")) && (!double.TryParse(Get("ollama_temperature"), NumberStyles.Float, CultureInfo.InvariantCulture, out double temperature) || !double.IsFinite(temperature) || temperature < 0 || temperature > 2 ||
             !double.TryParse(Get("ollama_top_p"), NumberStyles.Float, CultureInfo.InvariantCulture, out double topP) || !double.IsFinite(topP) || topP < 0 || topP > 1 ||
             !int.TryParse(Get("ollama_top_k"), NumberStyles.None, CultureInfo.InvariantCulture, out int topK) || topK < 0))
             return "Draft_ServiceSamplingInvalid";
@@ -117,6 +128,7 @@ internal sealed class ServicePreferenceDraft
         // The legacy parser uses explicit multiline tags; reject injected terminators.
         foreach (var field in values)
         {
+            if (fixedLocal && field.Key == PromptKey("Ollama")) continue;
             if (field.Key.EndsWith("_template") && (field.Value.Contains("<" + field.Key + "_end>") || ((Edited(field.Key) || field.Key == PromptKey(service)) && string.IsNullOrWhiteSpace(field.Value))))
                 return "Draft_ServicePromptInvalid";
             if (field.Key.EndsWith("_api_key") && field.Value.Contains("+++")) return "Draft_ServiceValueInvalid";

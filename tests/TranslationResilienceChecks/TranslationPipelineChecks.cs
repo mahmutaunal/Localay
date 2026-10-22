@@ -87,6 +87,54 @@ internal static class TranslationPipelineChecks
         }, default);
         Check(maximumBatch == 15 && batchCount == 3, "large pages use bounded sequential batches rather than unlimited provider parallelism");
 
+        var partialCoordinator = new TranslationBatchCoordinator();
+        var readyBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var lastBatchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseLastBatch = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var published = new List<string>();
+        int partialCalls = 0;
+        var partialScene = partialCoordinator.TranslateAsync("partial", Enumerable.Range(0, 16).Select(i => "source" + i).ToArray(),
+            async (blocks, token) =>
+            {
+                if (++partialCalls == 2)
+                {
+                    lastBatchEntered.TrySetResult();
+                    await releaseLastBatch.Task.WaitAsync(token);
+                }
+                return new(blocks.ToDictionary(b => b.Id, b => "tr:" + b.Text));
+            }, default, ready =>
+            {
+                published.AddRange(ready.Keys);
+                readyBatch.TrySetResult();
+                return Task.CompletedTask;
+            });
+        await lastBatchEntered.Task;
+        await readyBatch.Task;
+        Check(!partialScene.IsCompleted && published.Count == 15 && !published.Contains("source15"),
+            "ready game blocks can be presented while the last provider batch is still pending");
+        releaseLastBatch.SetResult();
+        var partialResult = await partialScene;
+        Check(partialCalls == 2 && partialResult.Count == 16 && published.Distinct().Count() == 16 && published.Count == 16 &&
+            partialResult.All(pair => pair.Value.Text == "tr:" + pair.Key),
+            "incremental publication preserves every source identity exactly once without extra provider calls");
+
+        using var cancelPartial = new CancellationTokenSource();
+        var partialCanceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int cancelCalls = 0, cancelPublications = 0;
+        var canceledScene = partialCoordinator.TranslateAsync("partial-canceled", Enumerable.Range(0, 16).Select(i => "cancel" + i).ToArray(),
+            async (blocks, token) =>
+            {
+                if (++cancelCalls == 2) await partialCanceled.Task.WaitAsync(token);
+                return new(blocks.ToDictionary(b => b.Id, b => "tr:" + b.Text));
+            }, cancelPartial.Token, ready =>
+            {
+                cancelPublications += ready.Count;
+                cancelPartial.Cancel();
+                return Task.CompletedTask;
+            });
+        try { await canceledScene; throw new Exception("partial caller cancellation ignored"); } catch (OperationCanceledException) { }
+        Check(cancelPublications == 15, "cancellation after partial publication prevents delivery of the remaining scene");
+
         var canceledOwner = new CancellationTokenSource();
         var joinedOwner = new CancellationTokenSource();
         var sharedStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -182,6 +230,7 @@ internal static class TranslationPipelineChecks
         Check(capacityResult.Count == 300 && capacityResult.Count(p => p.Value.Text == "ok") == 256 &&
             capacityResult.Count(p => p.Value.Text == null) == 44,
             "pending translation units are bounded and overflow is reported instead of silently dropped");
+        await GoogleCloudNmtChecks.RunAsync(Check);
     }
 
     sealed class ReplyHandler(Func<HttpResponseMessage> reply) : HttpMessageHandler

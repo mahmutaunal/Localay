@@ -1,6 +1,16 @@
 # P5 local model acceptance
 
-Status: **neither candidate selected**. P6 compiled and ran the shared portable adapter,
+2026-10-23: the [Hy-MT2 integration](../../docs/game-engine-direction.md) is implemented.
+Its fake-HTTP checks establish protocol behavior, not inference quality or a passing
+result under the historical policy below. No actual model run was performed.
+
+Research update, 2026-10-22: the hardware-based Hy-MT2 selection is withdrawn.
+The [research note](../../docs/local-translation-candidate.md) is archived, and no
+model download or new inference campaign is scheduled. Historical checks and
+acceptance policies below do not imply a production-approved model.
+See the [current narrow plan](../../docs/game-experience-plan.md).
+
+Historical P5/P6 status: **neither candidate selected by the measurement policy**. P6 compiled and ran the shared portable adapter,
 protocol and decision checks: LifetimeChecks 133 and TranslationResilienceChecks 91 passed.
 These are fake HTTP/package fixtures, not model inference or semantic/performance evidence.
 The required pinned macOS SDK was temporarily downloaded and hash-verified during P6;

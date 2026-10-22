@@ -19,6 +19,12 @@ internal sealed class OcrSceneSnapshot
     internal bool HasSameText(OcrSceneSnapshot other) =>
         _blocks.Select(b => b.Text).SequenceEqual(other._blocks.Select(b => b.Text), StringComparer.Ordinal);
 
+    // Provider work belongs to exact source strings, independently of OCR order,
+    // duplicated labels or screen positions. Geometry still needs separate validation.
+    internal bool HasSameTranslationUnits(OcrSceneSnapshot other) =>
+        new HashSet<string>(_blocks.Select(b => b.Text), StringComparer.Ordinal)
+            .SetEquals(other._blocks.Select(b => b.Text));
+
     internal bool HasSameLayout(OcrSceneSnapshot other) => HasSameText(other) && HasSameGeometry(other);
 
     internal bool HasSameGeometry(OcrSceneSnapshot other)

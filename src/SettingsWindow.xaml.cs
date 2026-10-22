@@ -741,16 +741,6 @@ namespace AlpWareStudio.Localay
             ("Overlay", "Lbl_ToggleOverlay", "hotKeyOverlay"),
             ("Setting", "Lbl_OpenSettings", "hotKeySetting"),
             ("Log", "Lbl_ToggleLog", "hotKeyLog"),
-            ("Select Area", "Lbl_SelectArea", "hotKeySelectArea"),
-            ("Clear Areas", "Lbl_ClearAllAreas", "hotKeyClearAreas"),
-            ("Clear Selected Area", "Lbl_ClearSelectedArea", "hotKeyClearPreviousArea"),
-            ("Show Area", "Lbl_ShowAreaBorder", "hotKeyShowArea"),
-            ("ChatBox", "Lbl_ToggleChatBox", "hotKeyChatBox"),
-            ("Area 1", "Lbl_SelectArea1", "hotKeyArea1"),
-            ("Area 2", "Lbl_SelectArea2", "hotKeyArea2"),
-            ("Area 3", "Lbl_SelectArea3", "hotKeyArea3"),
-            ("Area 4", "Lbl_SelectArea4", "hotKeyArea4"),
-            ("Area 5", "Lbl_SelectArea5", "hotKeyArea5"),
             ("Swap Languages", "Lbl_SwapLanguages", "hotKeySwapLanguages"),
             ("Retry Translation", "Lbl_TranslationRetry", "hotKeyRetryTranslate"),
             ("Select Exclude Region", "Lbl_SelectExcludeRegion", "hotKeyToggleExcludeRegions"),
@@ -1247,8 +1237,9 @@ namespace AlpWareStudio.Localay
                 googleTranslateServiceTypeComboBox.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
                 googleTranslateMappingLabel.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
                 googleTranslateMappingCheckBox.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
-                googleFreeFallbackLabel.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
-                googleFreeFallbackComboBox.Visibility = isGoogleTranslateSelected ? Visibility.Visible : Visibility.Collapsed;
+                bool isGoogleWeb = isGoogleTranslateSelected && googleTranslateServiceTypeComboBox.SelectedIndex == 0;
+                googleFreeFallbackLabel.Visibility = isGoogleWeb ? Visibility.Visible : Visibility.Collapsed;
+                googleFreeFallbackComboBox.Visibility = isGoogleWeb ? Visibility.Visible : Visibility.Collapsed;
 
                 // Hide prompt template for Google Translate / Yandex / Microsoft
                 bool showPromptTemplate = !isGoogleTranslateSelected && !isYandexSelected && !isMicrosoftSelected && !isMarianSelected;
@@ -1268,6 +1259,8 @@ namespace AlpWareStudio.Localay
                 promptTemplateTextBox.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
                 savePromptButton.Visibility = Visibility.Collapsed;
                 restoreDefaultPromptButton.Visibility = showPromptTemplate ? Visibility.Visible : Visibility.Collapsed;
+
+                RenderGameEngineEditor();
 
                 // Show/hide Microsoft-specific settings
                 // microsoftApiKeyLabel.Visibility = isMicrosoftSelected ? Visibility.Visible : Visibility.Collapsed;

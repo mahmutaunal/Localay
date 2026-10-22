@@ -13,6 +13,10 @@
     <Compile Include="../../src/TranslationRequestContext.cs" Link="TranslationRequestContext.cs" />
     <Compile Include="../../src/ITranslationService.cs" Link="ITranslationService.cs" />
     <Compile Include="../../src/TranslationCache.cs" Link="TranslationCache.cs" />
+    <Compile Include="../../src/GameTranslationProfile.cs" Link="GameTranslationProfile.cs" />
+    <Compile Include="../../src/HyMt2Profile.cs" Link="HyMt2Profile.cs" />
+    <Compile Include="../../src/HyMt2Client.cs" Link="HyMt2Client.cs" />
+    <Compile Include="../../src/GoogleCloudNmtClient.cs" Link="GoogleCloudNmtClient.cs" />
     <Compile Include="../../src/GoogleTranslateFreeClient.cs" Link="GoogleTranslateFreeClient.cs" />
     <Compile Include="../../src/GoogleTranslateWebToken.cs" Link="GoogleTranslateWebToken.cs" />
     <Compile Include="../../src/TranslateGemmaClient.cs" Link="TranslateGemmaClient.cs" />

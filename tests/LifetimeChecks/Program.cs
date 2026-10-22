@@ -223,7 +223,9 @@ using (var recovered = captureGate.TryEnter())
 OcrSettlementChecks.Run(Check);
 OcrCapturePolicyChecks.Run(Check);
 await TranslationPipelineChecks.RunAsync(Check);
+await GameTranslationFreshnessChecks.RunAsync(Check);
 await LocalModelChecks.RunAsync(Check);
+await HyMt2Checks.RunAsync(Check);
 RenderingResourceChecks.Run(Check);
 await NativeAbiChecks.RunIfConfiguredAsync(Check);
 Console.WriteLine($"{passed} lifetime checks passed. No network, Windows capture or user settings were accessed.");

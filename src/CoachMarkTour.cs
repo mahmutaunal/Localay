@@ -89,7 +89,7 @@ namespace AlpWareStudio.Localay
                 return;
 
             Current = new CoachMarkTour(window);
-            Current.ShowStep(window.hasSelectedTranslationArea || window.IsCapturingGameWindow ? Step.Start : Step.SelectArea);
+            Current.ShowStep(window.IsCapturingGameWindow ? Step.Start : Step.SelectArea);
         }
 
         /// <summary>
@@ -108,17 +108,8 @@ namespace AlpWareStudio.Localay
         /// </summary>
         public void OnTranslationStarted()
         {
-            if (_step == Step.ShowResult)
-                return;
-
-            if (_window.IsTranslationResultVisible)
-            {
-                Finish();
-            }
-            else
-            {
-                ShowStep(Step.ShowResult);
-            }
+            // Start prepares the game overlay automatically; there is no output-choice step.
+            Finish();
         }
 
         /// <summary>
@@ -141,8 +132,8 @@ namespace AlpWareStudio.Localay
             switch (step)
             {
                 case Step.SelectArea:
-                    _message.Text = string.Format(strings["Coach_SelectArea"], strings["Btn_SelectArea"], strings["Btn_SelectWindow"]);
-                    _popup.PlacementTarget = _window.selectAreaButton;
+                    _message.Text = strings["Flow_GameGuide"];
+                    _popup.PlacementTarget = _window.selectWindowButton;
                     break;
                 case Step.Start:
                     _message.Text = string.Format(strings["Coach_Start"], strings["Main_Start"], config.GetHotKey("Start/Stop"));

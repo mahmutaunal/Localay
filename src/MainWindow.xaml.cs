@@ -1,4 +1,4 @@
-using System.Windows;
+﻿using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -430,7 +430,6 @@ namespace AlpWareStudio.Localay
                 ConfigManager.Instance.SetForceUpdatePrompt(isForceUpdatePrompt);
 
             }
-            MonitorWindow.Instance.Show();
             // Create socket status text block
             CreateSocketStatusIndicator();
 
@@ -442,19 +441,9 @@ namespace AlpWareStudio.Localay
 
             // Register keyboard shortcuts events
             KeyboardShortcuts.StartStopRequested += (s, e) => OnStartButtonToggleClicked(toggleButton, new RoutedEventArgs());
-            KeyboardShortcuts.ClearAreasRequested += (s, e) => btnClearSelectionArea_Click(toggleButton, new RoutedEventArgs());
             KeyboardShortcuts.MonitorToggleRequested += (s, e) => MonitorButton_Click(monitorButton, new RoutedEventArgs());
-            KeyboardShortcuts.ChatBoxToggleRequested += (s, e) => ChatBoxButton_Click(chatBoxButton, new RoutedEventArgs());
             KeyboardShortcuts.SettingsToggleRequested += (s, e) => SettingsButton_Click(settingsButton, new RoutedEventArgs());
             KeyboardShortcuts.LogToggleRequested += (s, e) => LogButton_Click(this, new RoutedEventArgs());
-            KeyboardShortcuts.SelectTranslationRegion += (s, e) => SelectAreaButton_Click(selectAreaButton, new RoutedEventArgs());
-            KeyboardShortcuts.ClearSelectedAreaRequested += (s, e) => clearSelectedArea();
-            KeyboardShortcuts.ShowAreaRequested += (s, e) => ShowAreaButton_Click(showAreaButton, new RoutedEventArgs());
-            KeyboardShortcuts.SelectArea1Requested += (s, e) => SwitchToTranslationArea(0);
-            KeyboardShortcuts.SelectArea2Requested += (s, e) => SwitchToTranslationArea(1);
-            KeyboardShortcuts.SelectArea3Requested += (s, e) => SwitchToTranslationArea(2);
-            KeyboardShortcuts.SelectArea4Requested += (s, e) => SwitchToTranslationArea(3);
-            KeyboardShortcuts.SelectArea5Requested += (s, e) => SwitchToTranslationArea(4);
 
             // Swap languages hotkey
             KeyboardShortcuts.SwapLanguagesRequested += (s, e) =>
@@ -670,9 +659,9 @@ namespace AlpWareStudio.Localay
             SetOCRCheckIsWanted(false);
             OcrTiming.MarkCaptureSent();
 
-            // The overlay background colour is sampled from this frame once its OCR result is in.
-            // This copy is owned separately by Logic; the input stays owned by this awaited capture.
-            Logic.Instance.SetOcrSourceFrame(ConfigManager.Instance.IsAutoSetOverlayBackground() ? (Bitmap)image.Clone() : null);
+            // Game panels use opaque backgrounds; do not clone frames for legacy inpainting.
+            Logic.Instance.SetOcrSourceFrame(!isCapturingWindow && ConfigManager.Instance.IsAutoSetOverlayBackground()
+                ? (Bitmap)image.Clone() : null);
 
             string sourceLanguage = (sourceLanguageComboBox?.SelectedItem as ComboBoxItem)?.Content?.ToString()!;
             if (GetSelectedOcrMethod() == "Windows OCR")
@@ -836,8 +825,6 @@ namespace AlpWareStudio.Localay
             Console.WriteLine($"Total saved areas: {savedTranslationAreas.Count}, Current index: {currentAreaIndex + 1}");
 
             _workflowCaptureNeedsSelection = false;
-            _workflowCaptureConfirmed = false;
-            if (_workflowLanguagesConfirmed) _workflowStep = 1;
             // Update capture for new selection area
             UpdateCustomCaptureRect();
 
@@ -863,8 +850,6 @@ namespace AlpWareStudio.Localay
                     return;
                 }
                 _workflowCaptureNeedsSelection = false;
-                _workflowCaptureConfirmed = false;
-                if (_workflowLanguagesConfirmed) _workflowStep = 1;
             }
             if (MonitorWindow.Instance.textOverlayCanvas != null)
             {
@@ -1272,10 +1257,11 @@ namespace AlpWareStudio.Localay
         private void OnUpdateTick(object? sender, EventArgs e)
         {
 
-            // Fast freshness polling is limited to WGC, whose native producer retains
-            // one latest surface. Keep the existing GDI cadence for costly screen copies.
-            var interval = TimeSpan.FromMilliseconds(isStarted && _graphicsCaptureService != null ? 33 : 250);
+            // Watch focus while waiting without copying images. PerformCapture keeps
+            // the slower GDI cadence independently of this lightweight foreground poll.
+            var interval = TimeSpan.FromMilliseconds(_gameSession.IsArmed ? 33 : 250);
             if (_captureTimer.Interval != interval) _captureTimer.Interval = interval;
+            UpdateGameSession();
             PerformCapture();
         }
 
@@ -1292,8 +1278,8 @@ namespace AlpWareStudio.Localay
 
         private void OnStartButtonToggleClicked(object sender, RoutedEventArgs e)
         {
-            // The existing shortcut/tray command stops a running session and resumes a paused one.
-            if (isStarted) StopWorkflowSession();
+            // The shortcut/tray command stops an armed session, including foreground waiting.
+            if (_gameSession.IsArmed) StopWorkflowSession();
             else StartWorkflowSession();
         }
 
@@ -1309,6 +1295,7 @@ namespace AlpWareStudio.Localay
             _sessionShuttingDown = true;
             _clipboardPreferenceLifetime.Invalidate();
             isStarted = false;
+            _gameSession.Stop();
             // Dispose WGC capture service
             _graphicsCaptureService?.Dispose();
             _graphicsCaptureService = null;
@@ -1725,7 +1712,15 @@ namespace AlpWareStudio.Localay
         //!This is where we decide to process the bitmap we just grabbed or not
         private async void PerformCapture()
         {
+            UpdateGameSession();
             if (!isStarted) return;
+            if (_graphicsCaptureService == null)
+            {
+                long now = System.Diagnostics.Stopwatch.GetTimestamp();
+                if (_lastFallbackCaptureAt != 0 && System.Diagnostics.Stopwatch.GetElapsedTime(_lastFallbackCaptureAt, now)
+                    < TimeSpan.FromMilliseconds(250)) return;
+                _lastFallbackCaptureAt = now;
+            }
             using var captureTiming = PipelineDiagnostics.Capture();
             // Update the capture rectangle to ensure correct dimensions
             UpdateCaptureRect();
@@ -2005,28 +2000,8 @@ namespace AlpWareStudio.Localay
         // Toggle the monitor window
         private void MonitorButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_workflowCaptureConfirmed && !IsOverlayShown)
-            {
-                WorkflowStatusText.Text = UiText.Get("Flow_FirstCapture");
-                return;
-            }
-            // Hiding is always allowed; showing needs a game window on Windows 10 (see HideOverlayIfItWouldBeCaptured)
-            if (!IsOverlayKeptOutOfCapture && !IsOverlayShown)
-            {
-                System.Windows.MessageBox.Show(
-                        string.Format(LocalizationManager.Instance.Strings["Msg_Win10RequiresSelectWindow"]),
-                        LocalizationManager.Instance.Strings["Title_Information"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Information);
-            }
-            else
-            {
-                ToggleMonitorWindow();
-                if (IsTranslationResultVisible)
-                {
-                    CoachMarkTour.Current?.OnResultViewOpened();
-                }
-            }
+            if (IsOverlayShown) HideOverlay(notify: true);
+            else WorkflowStatusText.Text = UiText.Get(HasWorkflowGame ? "Flow_OverlayAutomatic" : "Flow_GameRequired");
         }
 
         /// <summary>
@@ -2364,9 +2339,9 @@ namespace AlpWareStudio.Localay
         // ChatBox Button click handler
         private void ChatBoxButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_workflowCaptureConfirmed && !isChatBoxVisible)
+            if (!HasWorkflowGame && !isChatBoxVisible)
             {
-                WorkflowStatusText.Text = UiText.Get("Flow_FirstCapture");
+                WorkflowStatusText.Text = UiText.Get("Flow_GameRequired");
                 return;
             }
             ToggleChatBox();
@@ -2801,24 +2776,8 @@ namespace AlpWareStudio.Localay
             if (CaptureSummaryText == null || WorkflowStatusText == null) return;
             var strings = LocalizationManager.Instance;
             bool hasWindow = isCapturingWindow && capturedWindowHandle != IntPtr.Zero;
-            bool hasCapture = hasSelectedTranslationArea || hasWindow;
-            if (hasSelectedTranslationArea)
-            {
-                CaptureSummaryText.Text = hasWindow
-                    ? string.Format(strings["Main_CaptureWindowArea"], capturedWindowTitle, currentAreaIndex + 1,
-                        (int)selectedTranslationArea.Width, (int)selectedTranslationArea.Height)
-                    : string.Format(strings["Main_CaptureArea"], currentAreaIndex + 1,
-                        (int)selectedTranslationArea.Width, (int)selectedTranslationArea.Height);
-            }
-            else
-            {
-                CaptureSummaryText.Text = hasWindow
-                    ? string.Format(strings["Main_CaptureWindow"], capturedWindowTitle)
-                    : strings["Main_NoCapture"];
-            }
-            btnClearSelectionArea.Visibility = hasCapture ? Visibility.Visible : Visibility.Collapsed;
-            showAreaButton.Visibility = hasSelectedTranslationArea ? Visibility.Visible : Visibility.Collapsed;
-            RefreshWorkflowControls(hasCapture);
+            CaptureSummaryText.Text = hasWindow ? capturedWindowTitle : strings["Flow_NoGame"];
+            RefreshWorkflowControls(hasWindow);
         }
 
         private static void SetResultButtonState(System.Windows.Controls.Button button, bool active)
@@ -2859,47 +2818,15 @@ namespace AlpWareStudio.Localay
         // Windows 10 must also hide an overlay that would now be captured from the screen.
         private void StopWindowCapture(bool windowLost)
         {
-            // Invalidate pending work before changing the source; keep the displayed result while paused.
-            Dispatcher.Invoke(() => PauseWorkflowSession("Flow_PausedSource"));
+            StopWorkflowSession();
+            _gameSession.Select(default);
             isCapturingWindow = false;
             capturedWindowHandle = IntPtr.Zero;
             capturedWindowTitle = string.Empty;
             _graphicsCaptureService?.Dispose();
             _graphicsCaptureService = null;
-
-            Dispatcher.Invoke(() =>
-            {
-                selectWindowButton.SetBinding(ContentControl.ContentProperty,
-                    new System.Windows.Data.Binding("Strings[Btn_SelectWindow]") { Source = LocalizationManager.Instance });
-                selectWindowButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");
-                // Losing/changing a window must not silently continue with a saved screen area.
-                _workflowCaptureConfirmed = false;
-                if (_workflowLanguagesConfirmed) _workflowStep = 1;
-                UpdateCaptureRect();
-                RefreshWorkflowSummary();
-                if (!IsWindows10)
-                {
-                    MonitorWindow.Instance.EnableExcludeFromCapture();
-                }
-                bool overlayHidden = HideOverlayIfItWouldBeCaptured();
-
-                if (windowLost)
-                {
-                    System.Windows.MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_WindowLost"],
-                        LocalizationManager.Instance.Strings["Title_WindowLost"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-                if (overlayHidden)
-                {
-                    System.Windows.MessageBox.Show(
-                        LocalizationManager.Instance.Strings["Msg_Win10OverlayHiddenNoWindow"],
-                        LocalizationManager.Instance.Strings["Title_Information"],
-                        MessageBoxButton.OK,
-                        MessageBoxImage.Warning);
-                }
-            });
+            RefreshWorkflowSummary();
+            WorkflowStatusText.Text = UiText.Get(windowLost ? "Flow_GameClosed" : "Flow_PausedSource");
         }
 
         // At startup: ask for the game window, so that it (not the screen area) is captured from the start.
@@ -2985,8 +2912,13 @@ namespace AlpWareStudio.Localay
         {
             if (windowHandle != IntPtr.Zero)
             {
-                // Preserve saved regions but do not crop a newly chosen window with old monitor geometry.
-                if (_workflowCaptureNeedsSelection) hasSelectedTranslationArea = false;
+                var identity = GameWindowObserver.Identify(windowHandle);
+                if (!identity.IsValid) { WorkflowStatusText.Text = UiText.Get("Flow_GameRequired"); return; }
+                if (_gameSession.IsTracking) StopWorkflowSession();
+                _gameSession.Select(identity);
+                MonitorWindow.ResetGamePresentationIfCreated();
+                // Game selection always captures its full window, never a saved screen region.
+                hasSelectedTranslationArea = false;
                 _workflowCaptureNeedsSelection = false;
                 Logic.Instance.ClearAllTextObjects();
                 capturedWindowHandle = windowHandle;
@@ -3016,10 +2948,8 @@ namespace AlpWareStudio.Localay
                         MonitorWindow.Instance.EnableExcludeFromCapture();
                 }
 
-                _workflowCaptureConfirmed = false;
-                if (_workflowLanguagesConfirmed) _workflowStep = 1;
                 selectWindowButton.SetBinding(ContentControl.ContentProperty,
-                    new System.Windows.Data.Binding("Strings[Main_ChangeApplication]") { Source = LocalizationManager.Instance });
+                    new System.Windows.Data.Binding("Strings[Flow_ChangeGame]") { Source = LocalizationManager.Instance });
                 RefreshWorkflowSummary();
                 CoachMarkTour.Current?.OnCaptureChosen();
                 selectWindowButton.SetResourceReference(Control.BackgroundProperty, "SurfaceBrush");

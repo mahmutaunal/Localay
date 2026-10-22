@@ -1,6 +1,7 @@
 """Static design integration checks. Does not compile, load or run Localay/WPF."""
 import json
 import re
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -38,8 +39,8 @@ names = [name for name in names if name]
 assert len(names) == len(set(names)), 'Duplicate names in the main window'
 for removed in ['languageSelector', 'themeToggleButton', 'AppVersion', 'logButton', 'resetSettingsButton']:
     assert removed not in names, removed
-for required in ['LanguagesStepContent', 'CaptureStepContent', 'ResultStepContent', 'confirmLanguagesButton',
-                 'confirmCaptureButton', 'confirmResultButton', 'WorkflowStatusText', 'toggleButton']:
+for required in ['LanguagesStepContent', 'selectWindowButton', 'sourceLanguageComboBox',
+                 'targetLanguageComboBox', 'WorkflowStatusText', 'toggleButton']:
     assert required in names, required
 toggle = next(el for el in main.iter() if el.get(xaml+'Name') == 'toggleButton')
 assert toggle.get('IsEnabled') == 'False', 'Start must be unavailable before readiness is evaluated'
@@ -47,6 +48,100 @@ settings = documents[root / 'src/SettingsWindow.xaml']
 categories = next(el for el in settings.iter(wpf+'TabControl') if el.get(xaml+'Name') == 'settingsCategories')
 assert len(list(categories)) == 7, 'Expected seven Settings sections'
 assert categories.get('TabStripPlacement') == 'Left'
+
+workflow = (root/'src/MainWindow.Workflow.cs').read_text()
+for removed in ['confirmLanguagesButton', 'confirmCaptureButton', 'confirmResultButton',
+                'overlayChoice', 'separateChoice', 'bothChoice', 'ResultStepContent']:
+    assert removed not in names, removed
+assert 'GameWorkflowReadiness.StartIssue(' in workflow
+assert 'ToggleChatBox()' not in workflow
+legacy = next(el for el in main.iter() if el.get(xaml+'Name') == 'LegacyCaptureControls')
+assert legacy.get('Visibility') == 'Collapsed' and legacy.get('IsEnabled') == 'False'
+assert not any(el.get('Click') for el in legacy.iter()), 'Legacy output/area buttons must not be interactive'
+main_cards = [el for el in main.iter(wpf+'TextBlock') if el.get('Style') == '{StaticResource SectionTitle}']
+assert [el.get('Text') for el in main_cards] == [
+    '{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_GameStep]}',
+    '{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_LanguagesStep]}']
+# Removed shortcuts must neither reserve global keys nor remain editable in Settings.
+shortcut_code = (root/'src/KeyboardShortcuts.cs').read_text().split('_hotkeyFunctions =', 1)[1].split('};', 1)[0]
+shortcut_rows = (root/'src/SettingsWindow.xaml.cs').read_text().split('HotkeyRowDefinitions =', 1)[1].split('};', 1)[0]
+for removed in ['ChatBox', 'Select Area', 'Clear Areas', 'Clear Selected Area', 'Show Area', 'Area 1', 'Area 2', 'Area 3', 'Area 4', 'Area 5']:
+    assert '("'+removed+'",' not in shortcut_code and '("'+removed+'",' not in shortcut_rows
+assert 'PrepareWorkflowStart()' in (root/'src/MainWindow.Session.cs').read_text()
+# Focus-driven session wiring is checked without importing or invoking Win32.
+session_source = (root/'src/MainWindow.Session.cs').read_text()
+main_source = (root/'src/MainWindow.xaml.cs').read_text()
+monitor_source = (root/'src/MonitorWindow.xaml.cs').read_text()
+start_source = session_source.split('private void StartWorkflowSession()', 1)[1].split('private void PauseWorkflowSession(', 1)[0]
+assert '_gameSession.Start();' in start_source and 'UpdateGameSession();' in start_source
+assert 'SetGameOverlayVisible(false);' in start_source and 'SetGameOverlayVisible(true)' not in start_source
+prepare_source = workflow.split('private bool PrepareWorkflowStart()', 1)[1].split('private void WorkflowOcrSetup_Click', 1)[0]
+assert 'ToggleMonitorWindow' not in prepare_source and 'overlay.Show' not in prepare_source
+capture_source = main_source.split('private async void PerformCapture()', 1)[1]
+assert capture_source.index('UpdateGameSession();') < capture_source.index('if (!isStarted) return;')
+activate_source = session_source.split('else if (action == GameSessionAction.Activate)', 1)[1].split('if (action != GameSessionAction.None)', 1)[0]
+assert activate_source.index('ResetHash();') < activate_source.index('isStarted = true;')
+assert activate_source.index('DiscardCachedFrames();') < activate_source.index('SetGameOverlayVisible(true);')
+assert '_changingGameOverlay || _sessionShuttingDown' in session_source
+assert 'MonitorWindow.HideForGameSessionIfCreated();' in session_source
+bitmap_update = monitor_source.split('public void UpdateScreenshotFromBitmap()', 1)[1].split('public ', 1)[0]
+assert bitmap_update.count('if (!MainWindow.IsGameSessionActive) return;') == 2
+stop_source = main_source.split('private void StopWindowCapture(bool windowLost)', 1)[1].split('// At startup:', 1)[0]
+assert stop_source.index('StopWorkflowSession();') < stop_source.index('capturedWindowHandle = IntPtr.Zero;')
+assert 'MessageBox' not in stop_source
+
+# Game presentation integration contracts; geometry is exercised by OverlayLayoutChecks.
+caption_source = monitor_source.split('private bool TryPrepareSubtitlePanel(', 1)[1].split('// Draw exclude regions', 1)[0]
+assert caption_source.index('string.IsNullOrWhiteSpace(sources[i].TextTranslated)') < caption_source.index('_subtitleText.Text =')
+assert caption_source.index('textOverlayCanvas.Children.Add(_subtitlePanel)') < caption_source.index('_subtitleText.Measure(')
+assert caption_source.index('_subtitleText.Measure(') < caption_source.index('_subtitleMeasuredSize = _subtitleText.DesiredSize')
+assert caption_source.index('_subtitleMeasuredSize.Height >') < caption_source.index('_subtitleMembers.Add(')
+assert 'TextTrimming = TextTrimming.None' in caption_source
+assert 'ResetGamePresentationIfCreated();' in main_source
+assert 'occupied.Any(box => SubtitlePanelPolicy.Overlaps(box, placement))' in monitor_source
+text_source = (root/'src/TextObject.cs').read_text()
+game_appearance = text_source.split('internal void ApplyGameAppearance(', 1)[1].split('internal OcrSceneBlock', 1)[0]
+assert 'Color.FromRgb(' in game_appearance and 'EraserElement = null;' in game_appearance
+assert '!isCapturingWindow && ConfigManager.Instance.IsAutoSetOverlayBackground()' in main_source
+assert '!MainWindow.Instance.IsCapturingGameWindow && ConfigManager.Instance.IsAutoSetOverlayBackground()' in (root/'src/Logic.cs').read_text()
+
+# A stable HUD must not pin obsolete game dialogue or prefetch to the provider queue.
+logic_source = (root/'src/Logic.cs').read_text()
+scene_observation = logic_source.split('bool supersededGameText =', 1)[1].split('if (!AreOverlaysCurrent)', 1)[0]
+assert 'MainWindow.Instance.IsCapturingGameWindow' in scene_observation
+assert scene_observation.index('!previousScene.HasSameTranslationUnits(scene)') < scene_observation.index('_ocrScene.Observe(scene)')
+assert 'if (supersededGameText || !_textObjects.Any(t => t.SourceFrameCurrent))' in scene_observation
+assert 'InvalidatePendingWork(discardSourceFrame: false);' in scene_observation
+invalidated_work = logic_source.split('private void InvalidatePendingWork(', 1)[1].split('public void ResetHash()', 1)[0]
+assert '_pipelineLifetime.Invalidate();' in invalidated_work and '_translationEpoch++;' in invalidated_work
+assert '_prefetchTask = null;' in invalidated_work and 'TranslationCache.Instance.Clear' not in invalidated_work
+
+service_ready = workflow.split('private bool WorkflowServiceConfigured()', 1)[1].split('private string? WorkflowStartIssue()', 1)[0]
+assert 'GameTranslationProfile.IsConfigured(' in service_ready
+google_source = (root/'src/GoogleTranslateService.cs').read_text()
+dispatch_source = google_source.split('public async Task<string?> TranslateAsync(', 1)[1].split('using var cancelGoogle', 1)[0]
+assert dispatch_source.index('GameTranslationProfile.AllowsDispatch(_useCloudApi, managedBlocks)') < dispatch_source.index('TranslateWithGoogleAsync(')
+assert 'GameTranslationProfile.AllowsFallback(managedBlocks)' in dispatch_source
+assert 'bool canHedge = allowFallback &&' in dispatch_source
+assert 'TranslateWithGoogleAsync(jsonData, prompt, allowFallback,' in dispatch_source
+cloud_transport = google_source.split('private async Task<List<string?>> TranslateBatchWithCloudApiAsync(', 1)[1].split('private string NormalizeText(', 1)[0]
+assert 'new GoogleCloudNmtClient(_httpClient)' in cloud_transport
+assert 'TranslateWithFallback' not in cloud_transport and 'TranslateFree' not in cloud_transport
+assert 'if (_autoMapLanguages || _useCloudApi)' in google_source
+assert 'GameTranslationProfile.MeaningContext(service, previousContext,' in logic_source
+assert 'GameTranslationProfile.CacheIdentity(GetGoogleTranslateUseCloudApi()' in (root/'src/ConfigManager.cs').read_text()
+
+if '--game-flow-only' in sys.argv:
+    main_code = (root/'src/MainWindow.xaml.cs').read_text()
+    selected_game = main_code.split('private void OnWindowSelected(', 1)[1].split('// Load language settings', 1)[0]
+    assert selected_game.index('hasSelectedTranslationArea = false;') < selected_game.index('StartCapture(windowHandle)')
+    assert '_workflowLanguagesConfirmed' not in workflow and '_workflowResultConfirmed' not in workflow
+    print(f'Game flow source checks passed: {len(documents)} XAML files, {linked_events} event links, game/language order, overlay-only start, removed legacy shortcuts and saved-area isolation.')
+    print('Game presentation contracts passed: complete fitted captions, render-DPI attachment, opaque masks, collision guards and game reset.')
+    print('Game freshness contracts passed: changed source units cancel obsolete foreground/prefetch work without clearing cached translations.')
+    print('Game provider contracts passed: keyless readiness, Cloud dispatch guard, no managed fallback/hedging and isolated cache identities.')
+    print('No Windows APIs, WPF loading or application execution.')
+    sys.exit(0)
 
 tokens = json.loads((root / 'docs/design/visual-tokens.json').read_text())
 generated = (root / 'src/DesignTokens.cs').read_text()
@@ -56,9 +151,6 @@ for _, light, dark in entries:
     assert dark in tokens['themes']['dark'].values()
 assert len(entries) == 22
 assert 'foreach (var (name, light, dark) in DesignTokens.Palette)' in (root/'src/ThemeManager.cs').read_text()
-workflow = (root/'src/MainWindow.Workflow.cs').read_text()
-assert '_workflowLanguagesConfirmed' in workflow and '_workflowCaptureConfirmed' in workflow and '_workflowResultConfirmed' in workflow
-assert 'PrepareWorkflowStart()' in (root/'src/MainWindow.Session.cs').read_text()
 print(f'Static design source checks passed: {len(documents)} XAML files, {linked_events} event links, 7 Settings sections, 22 palette roles.')
 print('No C# compilation, WPF loading, application execution or Windows behavior validation was performed.')
 
@@ -87,8 +179,8 @@ for manager in ['WindowsOCRManager.cs', 'OneOCRManager.cs']:
     callback = code.split('Application.Current.Dispatcher.Invoke((Action)(() => {', 1)[1]
     assert callback.index('if (canProcess != null && !canProcess()) return;') < callback.index('Logic.Instance.ProcessReceivedTextJsonData(jsonResponse);')
 assert logic.count('() => operation.IsCurrent && MainWindow.Instance.GetIsStarted()') == 2
-assert 'if (isStarted) StopWorkflowSession();' in main_code
-assert 'Dispatcher.Invoke(() => PauseWorkflowSession("Flow_PausedSource"));' in main_code
+assert 'if (_gameSession.IsArmed) StopWorkflowSession();' in main_code
+assert 'StopWorkflowSession();' in stop_source
 print('Static session wiring checks passed: pause/stop commands, output visibility hooks, lease invalidation, OCR dispatch guards.')
 
 # Source contracts for the scoped language/theme draft (no WPF or C# execution).
@@ -220,11 +312,11 @@ while ancestor is not settings:
 main_session = (root/'src/MainWindow.Session.cs').read_text()
 capture_apply = main_session.split('internal static void CapturePreferencesCommitted(', 1)[1].split('internal static void ServicePreferencesCommitted()', 1)[0]
 assert 'PauseWorkflowSession("Draft_CaptureSessionPaused")' in capture_apply
-assert 'main._workflowLanguagesConfirmed = false' in capture_apply
 assert 'main._workflowCaptureNeedsSelection = true' in capture_apply
-assert 'main._workflowCaptureConfirmed = false' in capture_apply and 'main._workflowResultConfirmed = false' in capture_apply
 assert 'SetAutoTranslateEnabled(' not in capture_apply and 'SetSelectedScreenIndex(' not in capture_apply
-assert 'if (_workflowCaptureNeedsSelection) return "Draft_CaptureSelectSource";' in workflow
+assert 'HasWorkflowGame, _workflowCaptureNeedsSelection, WorkflowLanguageIssue()' in workflow
+selected_game = main_code.split('private void OnWindowSelected(', 1)[1].split('// Load language settings', 1)[0]
+assert selected_game.index('hasSelectedTranslationArea = false;') < selected_game.index('StartCapture(windowHandle)')
 assert 'savedTranslationAreas[index].ScreenIndex != ConfigManager.Instance.GetSelectedScreenIndex()' in main_code
 monitor_code = (root/'src/MonitorWindow.xaml.cs').read_text()
 monitor_auto = monitor_code.split('private void AutoTranslateCheckBox_CheckedChanged(', 1)[1].split('private void MonitorWindow_Loaded(', 1)[0]

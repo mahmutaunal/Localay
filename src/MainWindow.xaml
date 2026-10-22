@@ -42,7 +42,6 @@
             <tb:TaskbarIcon.ContextMenu>
                 <ContextMenu>
                     <MenuItem x:Name="trayStartStopItem" Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Start]}" Click="TrayStartStop_Click" />
-                    <MenuItem Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Overlay]}" Click="TrayOverlay_Click" />
                     <Separator />
                     <MenuItem Header="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Settings]}" Click="TraySettings_Click" />
                     <Separator />
@@ -60,24 +59,44 @@
                 <Border Name="HeaderBorder" Background="{DynamicResource SurfaceBrush}" Padding="16,10" CornerRadius="12,12,0,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" MouseLeftButtonDown="Header_MouseLeftButtonDown">
                     <DockPanel LastChildFill="True">
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" WindowChrome.IsHitTestVisibleInChrome="True">
-                            <Button x:Name="settingsButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Settings]}" Click="SettingsButton_Click" />
-                            <Button x:Name="minimizeButton" Style="{StaticResource ActionButton}" Content="−" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Minimize]}" AutomationProperties.Name="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Minimize]}" Click="MinimizeButton_Click" />
-                            <Button Style="{StaticResource ActionButton}" Content="×" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Close]}" AutomationProperties.Name="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Close]}" Click="CloseButton_Click" />
+                            <Button x:Name="settingsButton" Style="{StaticResource ActionButton}" Margin="0,0,8,0" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Settings]}" Click="SettingsButton_Click" />
+                            <Button x:Name="minimizeButton" Style="{StaticResource ActionButton}" Margin="0,0,8,0" Content="−" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Minimize]}" AutomationProperties.Name="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Minimize]}" Click="MinimizeButton_Click" />
+                            <Button Style="{StaticResource ActionButton}" Margin="0" Content="×" ToolTip="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Close]}" AutomationProperties.Name="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Close]}" Click="CloseButton_Click" />
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <Image Source="/assets/localay.ico" Width="28" Height="28" Margin="0,0,10,8" />
-                            <TextBlock Text="Localay" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8" VerticalAlignment="Center" />
+                            <Image Source="/assets/localay.ico" Width="28" Height="28" Margin="0,0,10,0" />
+                            <TextBlock Text="Localay" FontSize="18" FontWeight="SemiBold" Margin="0" VerticalAlignment="Center" />
                         </StackPanel>
                     </DockPanel>
                 </Border>
                 <Grid Name="OverlayContent" Grid.Row="1">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="32,24" CanContentScroll="False">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="24,20" CanContentScroll="False">
                         <StackPanel MaxWidth="760">
                             <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Prepare]}" FontSize="26" FontWeight="Medium" TextWrapping="Wrap" x:Name="WorkflowHeading" />
-                            <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_Intro]}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18" />
+                            <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_GameIntro]}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18" />
+                            <Border Background="{DynamicResource Surface2Brush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,18">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,16,0">
+                                        <TextBlock x:Name="EngineSummaryText" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="EngineHintText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0" />
+                                    </StackPanel>
+                                    <Button Grid.Column="1" Style="{StaticResource LocalayQuietButton}" VerticalAlignment="Center" Click="EngineSettings_Click" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_EngineSettings]}" />
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource CardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <StackPanel Margin="0,0,16,0">
+                                        <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_GameStep]}" Style="{StaticResource SectionTitle}" />
+                                        <TextBlock x:Name="CaptureSummaryText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.LiveSetting="Polite" />
+                                    </StackPanel>
+                                    <Button x:Name="selectWindowButton" Grid.Column="1" Style="{StaticResource ActionButton}" VerticalAlignment="Center" Margin="0" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_SelectGame]}" Click="SelectWindowButton_Click" />
+                                </Grid>
+                            </Border>
                             <Border Style="{StaticResource CardStyle}">
                                 <StackPanel>
-                                    <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_StepLanguages]}" Style="{StaticResource SectionTitle}" />
+                                    <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_LanguagesStep]}" Style="{StaticResource SectionTitle}" />
                                     <StackPanel x:Name="LanguagesStepContent" Margin="0,16,0,0">
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -163,52 +182,19 @@
                                                 </ComboBox>
                                             </StackPanel>
                                         </Grid>
-                                        <TextBlock x:Name="LanguageReadinessText" Margin="0,12,0,0" />
+                                        <TextBlock x:Name="LanguageReadinessText" Margin="0,12,0,0" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite" />
                                         <Button x:Name="ocrSetupButton" Click="WorkflowOcrSetup_Click" HorizontalAlignment="Left" Margin="0,12,0,0" Visibility="Collapsed" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_SetupLanguage]}" />
-                                        <Button x:Name="confirmLanguagesButton" Style="{StaticResource LocalayPrimaryButton}" Click="ConfirmLanguages_Click" HorizontalAlignment="Left" Margin="0,16,0,0" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Continue]}" />
                                     </StackPanel>
-                                    <TextBlock x:Name="LanguageSummary" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" />
-                                    <Button x:Name="editLanguagesButton" Style="{StaticResource LocalayQuietButton}" Click="EditLanguages_Click" HorizontalAlignment="Right" Visibility="Collapsed" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Edit]}" />
                                 </StackPanel>
                             </Border>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_StepCapture]}" Style="{StaticResource SectionTitle}" />
-                                    <TextBlock x:Name="CaptureSummaryText" Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Main_NoCapture]}" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,4,0,0" AutomationProperties.LiveSetting="Polite" />
-                                    <StackPanel x:Name="CaptureStepContent" Margin="0,16,0,0" Visibility="Collapsed">
-                                        <ComboBox x:Name="screenSelectionComboBox" Height="36" MaxWidth="360" HorizontalAlignment="Left" MinWidth="260" Style="{StaticResource ThemedComboBox}" SelectionChanged="ScreenSelectionComboBox_SelectionChanged" Margin="0,0,0,12" />
-                                        <WrapPanel>
-                                            <Button x:Name="selectWindowButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_SelectWindow]}" Click="SelectWindowButton_Click" />
-                                            <Button x:Name="selectAreaButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_SelectArea]}" Click="SelectAreaButton_Click" />
-                                            <Button x:Name="btnClearSelectionArea" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Clear]}" Click="ClearCapture_Click" Visibility="Collapsed" />
-                                            <Button x:Name="showAreaButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Show]}" Click="ShowAreaButton_Click" Visibility="Collapsed" />
-                                        </WrapPanel>
-                                        <Button x:Name="confirmCaptureButton" Style="{StaticResource LocalayPrimaryButton}" Click="ConfirmCapture_Click" HorizontalAlignment="Left" Margin="0,16,0,0" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Continue]}" />
-                                    </StackPanel>
-                                    <Button x:Name="editCaptureButton" Style="{StaticResource LocalayQuietButton}" Click="EditCapture_Click" HorizontalAlignment="Right" Visibility="Collapsed" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Edit]}" />
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource CardStyle}">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_ResultStep]}" Style="{StaticResource SectionTitle}" />
-                                    <StackPanel x:Name="ResultStepContent" Margin="0,16,0,0" Visibility="Collapsed">
-                                        <WrapPanel>
-                                            <RadioButton x:Name="overlayChoice" GroupName="result" IsChecked="True" Checked="ResultChoice_Changed" Margin="0,0,16,16" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Overlay]}" />
-                                            <RadioButton x:Name="separateChoice" GroupName="result" Checked="ResultChoice_Changed" Margin="0,0,16,16" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_ChatBox]}" />
-                                            <RadioButton x:Name="bothChoice" GroupName="result" Checked="ResultChoice_Changed" Margin="0,0,16,16" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Both]}" />
-                                        </WrapPanel>
-                                        <TextBlock x:Name="ResultReadinessText" Margin="0,0,0,12" />
-                                        <Button x:Name="placeChatBoxButton" Click="PlaceChatBox_Click" HorizontalAlignment="Left" Margin="0,0,0,12" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_SetPosition]}" />
-                                        <Button x:Name="confirmResultButton" Style="{StaticResource LocalayPrimaryButton}" Click="ConfirmResult_Click" HorizontalAlignment="Left" Margin="0,16,0,0" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Continue]}" />
-                                    </StackPanel>
-                                    <TextBlock x:Name="ResultSummary" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0" />
-                                    <Button x:Name="editResultButton" Style="{StaticResource LocalayQuietButton}" Click="EditResult_Click" HorizontalAlignment="Right" Visibility="Collapsed" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Flow_Edit]}" />
-                                </StackPanel>
-                            </Border>
-                            <WrapPanel x:Name="SessionViewControls" Visibility="Collapsed" Margin="0,16,0,0">
-                                <Button x:Name="monitorButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Overlay]}" Click="MonitorButton_Click" />
-                                <Button x:Name="chatBoxButton" Style="{StaticResource ActionButton}" Content="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_ChatBox]}" Click="ChatBoxButton_Click" />
-                            </WrapPanel>
+                            <StackPanel x:Name="LegacyCaptureControls" Visibility="Collapsed" IsEnabled="False">
+                                <ComboBox x:Name="screenSelectionComboBox" SelectionChanged="ScreenSelectionComboBox_SelectionChanged" />
+                                <Button x:Name="selectAreaButton" />
+                                <Button x:Name="btnClearSelectionArea" />
+                                <Button x:Name="showAreaButton" />
+                                <Button x:Name="monitorButton" />
+                                <Button x:Name="chatBoxButton" />
+                            </StackPanel>
                             <StackPanel Visibility="Collapsed">
                                 <Ellipse x:Name="StartStatusEllipse" Width="8" Height="8" Fill="#ef4444" Margin="0,0,8,0" />
                                 <TextBlock x:Name="StartStatusText" Text="{Binding Source={x:Static local:LocalizationManager.Instance}, Path=Strings[Btn_Off]}" Foreground="{DynamicResource TextBrush}" FontSize="12" />

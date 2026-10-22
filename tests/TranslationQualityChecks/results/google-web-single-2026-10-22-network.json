@@ -1,0 +1,502 @@
+{
+  "corpusSha256": "a4016e7b930cc9b575fdf2a3990429f55571a280d31c73ca47b84de5794045e8",
+  "provenance": {
+    "kind": "engine_output",
+    "provider": "Google Translate",
+    "mode": "web",
+    "sourceLanguage": "en",
+    "targetLanguage": "tr",
+    "requestLayout": "single",
+    "adapter": "production GoogleTranslateFreeClient",
+    "cacheEnabled": false,
+    "runnerAssemblySha256": "f4ee543ec4ad788acbca40ac552447eb788f7bd5d95c9163240033e7d1ab9178",
+    "startedUtc": "2026-10-22T20:26:54.360025+00:00",
+    "finishedUtc": "2026-10-22T20:27:58.598376+00:00",
+    "timingScope": "client call including request spacing/retries/network; not end-to-end game latency"
+  },
+  "stoppedReason": null,
+  "attemptedCount": 60,
+  "completedCount": 60,
+  "results": [
+    {
+      "id": "ui-01",
+      "source": "Continue game",
+      "translation": "Oyuna devam et",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 826.74,
+      "failure": null
+    },
+    {
+      "id": "ui-02",
+      "source": "Load last checkpoint",
+      "translation": "Son kontrol noktas\u0131n\u0131 y\u00FCkle",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 929.01,
+      "failure": null
+    },
+    {
+      "id": "ui-03",
+      "source": "Overwrite this save?",
+      "translation": "Bu kaydetmenin \u00FCzerine yaz\u0131ls\u0131n m\u0131?",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 356.01,
+      "failure": null
+    },
+    {
+      "id": "ui-04",
+      "source": "Unsaved progress will be lost.",
+      "translation": "Kaydedilmemi\u015F ilerleme kaybolacakt\u0131r.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1659.62,
+      "failure": null
+    },
+    {
+      "id": "ui-05",
+      "source": "Hold to confirm",
+      "translation": "Onaylamak i\u00E7in bas\u0131l\u0131 tutun",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 791.06,
+      "failure": null
+    },
+    {
+      "id": "ui-06",
+      "source": "Invert vertical look",
+      "translation": "Dikey g\u00F6r\u00FCn\u00FCm\u00FC ters \u00E7evir",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 770,
+      "failure": null
+    },
+    {
+      "id": "ui-07",
+      "source": "Subtitles for dialogue only",
+      "translation": "Yaln\u0131zca diyalog i\u00E7in altyaz\u0131lar",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1333.36,
+      "failure": null
+    },
+    {
+      "id": "ui-08",
+      "source": "Restore default settings",
+      "translation": "Varsay\u0131lan ayarlar\u0131 geri y\u00FCkle",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 448.64,
+      "failure": null
+    },
+    {
+      "id": "ui-09",
+      "source": "Return to title screen",
+      "translation": "Ba\u015Fl\u0131k ekran\u0131na d\u00F6n",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1002.37,
+      "failure": null
+    },
+    {
+      "id": "ui-10",
+      "source": "Purchase unavailable while offline",
+      "translation": "Sat\u0131n alma i\u015Flemi \u00E7evrimd\u0131\u015F\u0131yken yap\u0131lam\u0131yor",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1344.33,
+      "failure": null
+    },
+    {
+      "id": "instruction-01",
+      "source": "Do not release the prisoner.",
+      "translation": "Mahk\u00FBmu serbest b\u0131rakmay\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 920.19,
+      "failure": null
+    },
+    {
+      "id": "instruction-02",
+      "source": "You cannot fast travel while enemies are nearby.",
+      "translation": "D\u00FC\u015Fmanlar yak\u0131ndayken h\u0131zl\u0131 seyahat edemezsiniz.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1183.5,
+      "failure": null
+    },
+    {
+      "id": "instruction-03",
+      "source": "Defeat the guards without raising the alarm.",
+      "translation": "Alarm\u0131 y\u00FCkseltmeden gardiyanlar\u0131 yen.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 966.84,
+      "failure": null
+    },
+    {
+      "id": "instruction-04",
+      "source": "Unless you lower the bridge, the caravan cannot cross.",
+      "translation": "K\u00F6pr\u00FCy\u00FC indirmedi\u011Finiz s\u00FCrece kervan ge\u00E7emez.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1096.56,
+      "failure": null
+    },
+    {
+      "id": "instruction-05",
+      "source": "Only the host can start this mission.",
+      "translation": "Bu g\u00F6reve yaln\u0131zca toplant\u0131 sahibi ba\u015Flayabilir.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1123.01,
+      "failure": null
+    },
+    {
+      "id": "instruction-06",
+      "source": "Destroy the generator before opening the gate.",
+      "translation": "Kap\u0131y\u0131 a\u00E7madan \u00F6nce jenerat\u00F6r\u00FC yok edin.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 880.12,
+      "failure": null
+    },
+    {
+      "id": "instruction-07",
+      "source": "Keep the target alive until extraction.",
+      "translation": "\u00C7\u0131kar\u0131lana kadar hedefi canl\u0131 tutun.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 617.39,
+      "failure": null
+    },
+    {
+      "id": "instruction-08",
+      "source": "Taking damage interrupts healing.",
+      "translation": "Hasar almak iyile\u015Fmeyi kesintiye u\u011Frat\u0131r.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1221.73,
+      "failure": null
+    },
+    {
+      "id": "instruction-09",
+      "source": "This door can only be opened from the other side.",
+      "translation": "Bu kap\u0131 sadece di\u011Fer taraftan a\u00E7\u0131labilir.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1146.67,
+      "failure": null
+    },
+    {
+      "id": "instruction-10",
+      "source": "You may leave, but your reward will be forfeited.",
+      "translation": "Ayr\u0131labilirsiniz ancak \u00F6d\u00FCl\u00FCn\u00FCz kaybedilecektir.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 836,
+      "failure": null
+    },
+    {
+      "id": "dialogue-01",
+      "source": "I\u0027ve got your back.",
+      "translation": "Arkan\u0131 kollad\u0131m.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 951.6,
+      "failure": null
+    },
+    {
+      "id": "dialogue-02",
+      "source": "We\u0027re not out of the woods yet.",
+      "translation": "Hen\u00FCz ormandan \u00E7\u0131kmad\u0131k.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1093.22,
+      "failure": null
+    },
+    {
+      "id": "dialogue-03",
+      "source": "That was a close call.",
+      "translation": "Bu yak\u0131n bir karard\u0131.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 623.36,
+      "failure": null
+    },
+    {
+      "id": "dialogue-04",
+      "source": "Don\u0027t push your luck.",
+      "translation": "\u015Eans\u0131n\u0131z\u0131 zorlamay\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1405.57,
+      "failure": null
+    },
+    {
+      "id": "dialogue-05",
+      "source": "You sold us out for a handful of coins.",
+      "translation": "Bir avu\u00E7 kuru\u015Fa bizi satt\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1437.03,
+      "failure": null
+    },
+    {
+      "id": "dialogue-06",
+      "source": "I should have listened to you.",
+      "translation": "Seni dinlemeliydim.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 158.27,
+      "failure": null
+    },
+    {
+      "id": "dialogue-07",
+      "source": "If I hadn\u0027t missed, he\u0027d still be alive.",
+      "translation": "Ka\u00E7\u0131rmasayd\u0131m h\u00E2l\u00E2 hayatta olacakt\u0131.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1042.71,
+      "failure": null
+    },
+    {
+      "id": "dialogue-08",
+      "source": "You didn\u0027t think I\u0027d leave you here, did you?",
+      "translation": "Seni burada b\u0131rakaca\u011F\u0131m\u0131 d\u00FC\u015F\u00FCnmedin de\u011Fil mi?",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 3024,
+      "failure": null
+    },
+    {
+      "id": "dialogue-09",
+      "source": "So much for a quiet entrance.",
+      "translation": "Sessiz bir giri\u015F i\u00E7in bu kadar.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 3244.8,
+      "failure": null
+    },
+    {
+      "id": "dialogue-10",
+      "source": "I\u0027d rather lose the crown than lose you.",
+      "translation": "Seni kaybetmektense tac\u0131 kaybetmeyi tercih ederim.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 2305.19,
+      "failure": null
+    },
+    {
+      "id": "context-01",
+      "source": "Charge!",
+      "translation": "\u015Earj!",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 338.8,
+      "failure": null
+    },
+    {
+      "id": "context-02",
+      "source": "Watch the bat.",
+      "translation": "Sopay\u0131 izle.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1451.03,
+      "failure": null
+    },
+    {
+      "id": "context-03",
+      "source": "The party is waiting.",
+      "translation": "Parti bekliyor.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 792.03,
+      "failure": null
+    },
+    {
+      "id": "context-04",
+      "source": "She left the bank.",
+      "translation": "Bankadan ayr\u0131ld\u0131.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 964.6,
+      "failure": null
+    },
+    {
+      "id": "context-05",
+      "source": "Take the right path.",
+      "translation": "Do\u011Fru yolu se\u00E7in.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1147.09,
+      "failure": null
+    },
+    {
+      "id": "context-06",
+      "source": "That\u0027s a fine blade.",
+      "translation": "Bu \u00E7ok iyi bir b\u0131\u00E7ak.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 828.63,
+      "failure": null
+    },
+    {
+      "id": "context-07",
+      "source": "The seal is broken.",
+      "translation": "M\u00FCh\u00FCr k\u0131r\u0131lm\u0131\u015F.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1254.49,
+      "failure": null
+    },
+    {
+      "id": "context-08",
+      "source": "Drop it.",
+      "translation": "B\u0131rak onu.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 361.13,
+      "failure": null
+    },
+    {
+      "id": "context-09",
+      "source": "Nice shot.",
+      "translation": "G\u00FCzel at\u0131\u015F.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 968.27,
+      "failure": null
+    },
+    {
+      "id": "context-10",
+      "source": "He is down.",
+      "translation": "O a\u015Fa\u011F\u0131da.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1327.34,
+      "failure": null
+    },
+    {
+      "id": "item-01",
+      "source": "Armor penetration",
+      "translation": "Z\u0131rh n\u00FCfuzu",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 678.9,
+      "failure": null
+    },
+    {
+      "id": "item-02",
+      "source": "Damage over time",
+      "translation": "Zamanla hasar",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 998.66,
+      "failure": null
+    },
+    {
+      "id": "item-03",
+      "source": "Cooldown reduction",
+      "translation": "Bekleme s\u00FCresinde azalma",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1417.8,
+      "failure": null
+    },
+    {
+      "id": "item-04",
+      "source": "Bound to your account",
+      "translation": "Hesab\u0131n\u0131za ba\u011Fl\u0131",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1173.72,
+      "failure": null
+    },
+    {
+      "id": "item-05",
+      "source": "This item is consumed on use.",
+      "translation": "Bu madde kullan\u0131ld\u0131k\u00E7a t\u00FCketilir.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1013.27,
+      "failure": null
+    },
+    {
+      "id": "item-06",
+      "source": "Grants immunity to poison, not to bleeding.",
+      "translation": "Kanamaya de\u011Fil zehire kar\u015F\u0131 ba\u011F\u0131\u015F\u0131kl\u0131k kazand\u0131r\u0131r.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 849.27,
+      "failure": null
+    },
+    {
+      "id": "item-07",
+      "source": "Revive a fallen ally",
+      "translation": "D\u00FC\u015Fm\u00FC\u015F bir m\u00FCttefiki dirilt",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1046.67,
+      "failure": null
+    },
+    {
+      "id": "item-08",
+      "source": "Life steal applies only to weapon damage.",
+      "translation": "Can \u00E7alma yaln\u0131zca silah hasar\u0131 i\u00E7in ge\u00E7erlidir.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 669.11,
+      "failure": null
+    },
+    {
+      "id": "item-09",
+      "source": "Equipping this ring disables your shield.",
+      "translation": "Bu y\u00FCz\u00FC\u011F\u00FC takmak kalkan\u0131n\u0131z\u0131 devre d\u0131\u015F\u0131 b\u0131rak\u0131r.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1502.36,
+      "failure": null
+    },
+    {
+      "id": "item-10",
+      "source": "The Ashen Crown cannot be sold or dismantled.",
+      "translation": "Ashen Crown sat\u0131lamaz veya par\u00E7alara ayr\u0131lamaz.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 965.37,
+      "failure": null
+    },
+    {
+      "id": "format-01",
+      "source": "Welcome back, {player}!",
+      "translation": "Tekrar ho\u015F geldiniz {player}!",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1026.49,
+      "failure": null
+    },
+    {
+      "id": "format-02",
+      "source": "Press [E] to interact.",
+      "translation": "Etkile\u015Fim i\u00E7in [E] tu\u015Funa bas\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 951.59,
+      "failure": null
+    },
+    {
+      "id": "format-03",
+      "source": "Defeat {count} enemies with {weapon}.",
+      "translation": "{weapon} ile {count} d\u00FC\u015Fman\u0131 ma\u011Flup edin.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 928.93,
+      "failure": null
+    },
+    {
+      "id": "format-04",
+      "source": "Cooldown: 10 seconds. Damage: 250.",
+      "translation": "Bekleme s\u00FCresi: 10 saniye. Hasar: 250.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 771.64,
+      "failure": null
+    },
+    {
+      "id": "format-05",
+      "source": "Health below 25% increases damage by 10%.",
+      "translation": "Sa\u011Fl\u0131\u011F\u0131n %25\u0027in alt\u0131nda olmas\u0131 hasar\u0131 %10 art\u0131r\u0131r.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 836.79,
+      "failure": null
+    },
+    {
+      "id": "format-06",
+      "source": "You need 3 keys, not 2.",
+      "translation": "2 de\u011Fil 3 anahtara ihtiyac\u0131n\u0131z var.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1177.08,
+      "failure": null
+    },
+    {
+      "id": "format-07",
+      "source": "Quest complete: {0}\nReward: {1} gold",
+      "translation": "G\u00F6rev tamamland\u0131: {0}\n\u00D6d\u00FCl: {1} alt\u0131n",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 983.8,
+      "failure": null
+    },
+    {
+      "id": "format-08",
+      "source": "Hold [Shift] and press [E] twice.",
+      "translation": "[Shift] tu\u015Funu bas\u0131l\u0131 tutun ve iki kez [E] tu\u015Funa bas\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 1644.73,
+      "failure": null
+    },
+    {
+      "id": "format-09",
+      "source": "Earn 100 gold; spend no more than 40.",
+      "translation": "100 alt\u0131n kazan\u0131n; 40\u0027tan fazla harcamay\u0131n.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 485.16,
+      "failure": null
+    },
+    {
+      "id": "format-10",
+      "source": "Deliver {item} to {npc} before day 5.",
+      "translation": "{item}\u0027\u0131 5. g\u00FCnden \u00F6nce {npc}\u0027ye teslim edin.",
+      "status": "success",
+      "elapsedMsIncludingClientSpacing": 934.54,
+      "failure": null
+    }
+  ]
+}

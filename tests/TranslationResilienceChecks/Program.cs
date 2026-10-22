@@ -105,6 +105,7 @@ Check(!TranslationRequestContext.IsManaged, "request diagnostics never leak into
 
 await TranslationPipelineChecks.RunAsync(Check);
 await LocalModelChecks.RunAsync(Check);
+await HyMt2Checks.RunAsync(Check);
 Console.WriteLine($"{passed} translation resilience checks passed.");
 
 sealed class ReplyHandler(Func<HttpResponseMessage> reply) : HttpMessageHandler

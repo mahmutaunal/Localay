@@ -9,6 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/ServicePreferenceDraft.cs" Link="ServicePreferenceDraft.cs" />
+    <Compile Include="../../src/HyMt2Profile.cs" Link="HyMt2Profile.cs" />
     <Compile Include="../../src/SectionPreferenceDraft.cs" Link="SectionPreferenceDraft.cs" />
     <Compile Include="../../src/ProfileDocument.cs" Link="ProfileDocument.cs" />
     <Compile Include="../../src/ResultPreferenceDraft.cs" Link="ResultPreferenceDraft.cs" />

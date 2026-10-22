@@ -107,7 +107,7 @@ public partial class SettingsWindow
             _ => ""
         };
         _serviceDraft!.Set(key, value);
-        if (key == "google_translate_use_cloud_api") UpdateServiceSpecificSettings(_serviceDraft.Service);
+        if (key is "google_translate_use_cloud_api" or "ollama_model") UpdateServiceSpecificSettings(_serviceDraft.Service);
         ServiceDraftEdited();
     }
 
@@ -171,12 +171,13 @@ public partial class SettingsWindow
     private void RenderServiceDraft()
     {
         if (_serviceDraft == null || serviceDraftStatusText == null) return;
+        RenderGameEngineEditor();
         // Re-read legacy prompt files on hydration/save, not on every keypress.
         var current = _observedServicePreferences ?? ConfigManager.Instance.ReadServicePreferences();
         bool conflict = _serviceDraft.HasConflict(current);
         var candidate = _serviceDraft.Candidate();
         string? issue = ServicePreferenceDraft.Validate(candidate, _serviceDraft.Baseline);
-        serviceKeysSummaryText.Visibility = ServicePreferenceDraft.KeyPrefixes.ContainsKey(_serviceDraft.Service) ? Visibility.Visible : Visibility.Collapsed;
+        serviceKeysSummaryText.Visibility = ServicePreferenceDraft.KeyPrefixes.ContainsKey(_serviceDraft.Service) && _serviceDraft.Service != "Google Translate" ? Visibility.Visible : Visibility.Collapsed;
         if (ServicePreferenceDraft.KeyPrefixes.TryGetValue(_serviceDraft.Service, out string? keyPrefix))
             UiText.Bind(serviceKeysSummaryText, TextBlock.TextProperty, "Draft_ServiceKeysCount",
                 candidate[keyPrefix + "_api_keys"].Split("+++", StringSplitOptions.RemoveEmptyEntries).Length);
@@ -188,6 +189,7 @@ public partial class SettingsWindow
         cancelServiceDraftButton.IsEnabled = _serviceDraft.IsDirty && !_savingServiceDraft;
         stayWithServiceDraftButton.Visibility = _pendingServiceAction != null ? Visibility.Visible : Visibility.Collapsed;
         testModelButton.IsEnabled = !_serviceDraft.IsDirty && issue == null;
+        gameModelDownloadButton.IsEnabled = testModelButton.IsEnabled && !_savingServiceDraft;
     }
 
     private void SaveServiceDraft_Click(object sender, RoutedEventArgs e)

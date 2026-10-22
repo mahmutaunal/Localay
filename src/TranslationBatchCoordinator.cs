@@ -36,8 +36,10 @@ internal sealed class TranslationBatchCoordinator
     internal async Task<IReadOnlyDictionary<string, TranslationBlockResult>> TranslateAsync(string context,
         IReadOnlyList<string> texts,
         Func<IReadOnlyList<TranslationBlock>, CancellationToken, Task<TranslationBatchResult>> execute,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        Func<IReadOnlyDictionary<string, TranslationBlockResult>, Task>? onReady = null, int batchSize = BatchSize)
     {
+        if (batchSize is < 1 or > BatchSize) throw new ArgumentOutOfRangeException(nameof(batchSize));
         cancellation.ThrowIfCancellationRequested();
         var subscribed = new List<Entry>();
         Job? created = null;
@@ -64,13 +66,34 @@ internal sealed class TranslationBatchCoordinator
                 subscribed.Add(entry);
             }
         }
-        if (created != null) _ = RunAsync(created, execute);
+        if (created != null) _ = RunAsync(created, execute, batchSize);
         try
         {
-            // Await all promises together: a later completed unit is not hidden behind
-            // sequential awaits, and cancellation cannot leave unobserved faulted tasks.
-            var results = await Task.WhenAll(subscribed.Select(e => e.Completion.Task)).WaitAsync(cancellation).ConfigureAwait(false);
-            for (int i = 0; i < subscribed.Count; i++) rejected[subscribed[i].Block.Text] = results[i];
+            if (onReady == null)
+            {
+                var results = await Task.WhenAll(subscribed.Select(e => e.Completion.Task)).WaitAsync(cancellation).ConfigureAwait(false);
+                for (int i = 0; i < subscribed.Count; i++) rejected[subscribed[i].Block.Text] = results[i];
+            }
+            else
+            {
+                // Publish whichever shared promises are ready, including prefetch results,
+                // without holding them behind the rest of the scene or reissuing requests.
+                var pending = new List<Entry>(subscribed);
+                while (pending.Count > 0)
+                {
+                    await Task.WhenAny(pending.Select(e => e.Completion.Task)).WaitAsync(cancellation).ConfigureAwait(false);
+                    cancellation.ThrowIfCancellationRequested();
+                    var ready = new Dictionary<string, TranslationBlockResult>(StringComparer.Ordinal);
+                    foreach (var entry in pending.Where(e => e.Completion.Task.IsCompleted).ToArray())
+                    {
+                        var result = await entry.Completion.Task.ConfigureAwait(false);
+                        rejected[entry.Block.Text] = ready[entry.Block.Text] = result;
+                        pending.Remove(entry);
+                    }
+                    await onReady(ready).ConfigureAwait(false);
+                    cancellation.ThrowIfCancellationRequested();
+                }
+            }
             return rejected;
         }
         finally
@@ -87,14 +110,14 @@ internal sealed class TranslationBatchCoordinator
     }
 
     private async Task RunAsync(Job job,
-        Func<IReadOnlyList<TranslationBlock>, CancellationToken, Task<TranslationBatchResult>> execute)
+        Func<IReadOnlyList<TranslationBlock>, CancellationToken, Task<TranslationBatchResult>> execute, int batchSize)
     {
         bool entered = false;
         try
         {
             await _provider.WaitAsync(job.Source.Token).ConfigureAwait(false);
             entered = true;
-            foreach (var chunk in job.Entries.Chunk(BatchSize))
+            foreach (var chunk in job.Entries.Chunk(batchSize))
             {
                 job.Source.Token.ThrowIfCancellationRequested();
                 // execute must await actual provider completion, even if it ignores cancellation.

@@ -130,6 +130,7 @@ try
     foreach (string provider in ServicePreferenceDraft.Services.Where(ServicePreferenceDraft.UsesPrompt))
         serviceValues[ServicePreferenceDraft.PromptKey(provider)] = "Translate source_language to target_language.";
     var serviceDraft = new ServicePreferenceDraft(serviceValues);
+    GameEnginePreferenceChecks.Run(Check);
     Check(!serviceDraft.IsDirty && ServicePreferenceDraft.Validate(serviceDraft.Candidate(), serviceDraft.Baseline) == null,
         "default service editor can save without configuring inactive Custom API");
     serviceDraft.Set("translation_service", "Ollama");

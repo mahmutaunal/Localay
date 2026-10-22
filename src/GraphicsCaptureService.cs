@@ -22,9 +22,11 @@ namespace AlpWareStudio.Localay
         private bool _disposed;
         private bool _itemClosed;
         private Bitmap? _lastFrame;
+        private TimeSpan _minimumFrameTime;
         private const int FramePoolCapacity = 2;
         private readonly object _frameGate = new();
         private readonly LatestCaptureFrame<Direct3D11CaptureFrame> _latestFrame = new();
+        internal bool IsTargetClosed { get { lock (_frameGate) return _itemClosed; } }
 
         /// <summary>
         /// Check whether Windows Graphics Capture is available on this system.
@@ -135,6 +137,7 @@ namespace AlpWareStudio.Localay
                     Bitmap bitmap;
                     try
                     {
+                        if (frame.SystemRelativeTime <= _minimumFrameTime) return null;
                         contentSize = frame.ContentSize;
                         if (contentSize.Width <= 0 || contentSize.Height <= 0) return null;
                         bitmap = _d3dHelper.SurfaceToBitmap(frame.Surface, contentSize.Width, contentSize.Height);
@@ -170,6 +173,20 @@ namespace AlpWareStudio.Localay
                     Console.WriteLine($"WGC CaptureFrame error: {ex.Message}");
                     return null;
                 }
+            }
+        }
+
+        // QPC time is shared with Direct3D11CaptureFrame.SystemRelativeTime. Reject
+        // pre-resume surfaces even if their FrameArrived callback was queued late.
+        internal void DiscardCachedFrames()
+        {
+            lock (_frameGate)
+            {
+                _minimumFrameTime = TimeSpan.FromSeconds(System.Diagnostics.Stopwatch.GetTimestamp() /
+                    (double)System.Diagnostics.Stopwatch.Frequency);
+                _latestFrame.Clear();
+                _lastFrame?.Dispose();
+                _lastFrame = null;
             }
         }
 

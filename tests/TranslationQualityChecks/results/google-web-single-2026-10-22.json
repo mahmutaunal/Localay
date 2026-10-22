@@ -1,0 +1,502 @@
+{
+  "corpusSha256": "a4016e7b930cc9b575fdf2a3990429f55571a280d31c73ca47b84de5794045e8",
+  "provenance": {
+    "kind": "engine_output",
+    "provider": "Google Translate",
+    "mode": "web",
+    "sourceLanguage": "en",
+    "targetLanguage": "tr",
+    "requestLayout": "single",
+    "adapter": "production GoogleTranslateFreeClient",
+    "cacheEnabled": false,
+    "runnerAssemblySha256": "f4ee543ec4ad788acbca40ac552447eb788f7bd5d95c9163240033e7d1ab9178",
+    "startedUtc": "2026-10-22T20:26:42.998417+00:00",
+    "finishedUtc": "2026-10-22T20:26:45.016114+00:00",
+    "timingScope": "client call including request spacing/retries/network; not end-to-end game latency"
+  },
+  "stoppedReason": "Network",
+  "attemptedCount": 1,
+  "completedCount": 0,
+  "results": [
+    {
+      "id": "ui-01",
+      "source": "Continue game",
+      "translation": null,
+      "status": "failed",
+      "elapsedMsIncludingClientSpacing": 2008.96,
+      "failure": "Network"
+    },
+    {
+      "id": "ui-02",
+      "source": "Load last checkpoint",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-03",
+      "source": "Overwrite this save?",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-04",
+      "source": "Unsaved progress will be lost.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-05",
+      "source": "Hold to confirm",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-06",
+      "source": "Invert vertical look",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-07",
+      "source": "Subtitles for dialogue only",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-08",
+      "source": "Restore default settings",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-09",
+      "source": "Return to title screen",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "ui-10",
+      "source": "Purchase unavailable while offline",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-01",
+      "source": "Do not release the prisoner.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-02",
+      "source": "You cannot fast travel while enemies are nearby.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-03",
+      "source": "Defeat the guards without raising the alarm.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-04",
+      "source": "Unless you lower the bridge, the caravan cannot cross.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-05",
+      "source": "Only the host can start this mission.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-06",
+      "source": "Destroy the generator before opening the gate.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-07",
+      "source": "Keep the target alive until extraction.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-08",
+      "source": "Taking damage interrupts healing.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-09",
+      "source": "This door can only be opened from the other side.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "instruction-10",
+      "source": "You may leave, but your reward will be forfeited.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-01",
+      "source": "I\u0027ve got your back.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-02",
+      "source": "We\u0027re not out of the woods yet.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-03",
+      "source": "That was a close call.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-04",
+      "source": "Don\u0027t push your luck.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-05",
+      "source": "You sold us out for a handful of coins.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-06",
+      "source": "I should have listened to you.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-07",
+      "source": "If I hadn\u0027t missed, he\u0027d still be alive.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-08",
+      "source": "You didn\u0027t think I\u0027d leave you here, did you?",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-09",
+      "source": "So much for a quiet entrance.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "dialogue-10",
+      "source": "I\u0027d rather lose the crown than lose you.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-01",
+      "source": "Charge!",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-02",
+      "source": "Watch the bat.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-03",
+      "source": "The party is waiting.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-04",
+      "source": "She left the bank.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-05",
+      "source": "Take the right path.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-06",
+      "source": "That\u0027s a fine blade.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-07",
+      "source": "The seal is broken.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-08",
+      "source": "Drop it.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-09",
+      "source": "Nice shot.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "context-10",
+      "source": "He is down.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-01",
+      "source": "Armor penetration",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-02",
+      "source": "Damage over time",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-03",
+      "source": "Cooldown reduction",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-04",
+      "source": "Bound to your account",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-05",
+      "source": "This item is consumed on use.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-06",
+      "source": "Grants immunity to poison, not to bleeding.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-07",
+      "source": "Revive a fallen ally",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-08",
+      "source": "Life steal applies only to weapon damage.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-09",
+      "source": "Equipping this ring disables your shield.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "item-10",
+      "source": "The Ashen Crown cannot be sold or dismantled.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-01",
+      "source": "Welcome back, {player}!",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-02",
+      "source": "Press [E] to interact.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-03",
+      "source": "Defeat {count} enemies with {weapon}.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-04",
+      "source": "Cooldown: 10 seconds. Damage: 250.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-05",
+      "source": "Health below 25% increases damage by 10%.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-06",
+      "source": "You need 3 keys, not 2.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-07",
+      "source": "Quest complete: {0}\nReward: {1} gold",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-08",
+      "source": "Hold [Shift] and press [E] twice.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-09",
+      "source": "Earn 100 gold; spend no more than 40.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    },
+    {
+      "id": "format-10",
+      "source": "Deliver {item} to {npc} before day 5.",
+      "translation": null,
+      "status": "not_attempted",
+      "elapsedMsIncludingClientSpacing": null,
+      "failure": null
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
@@ -537,6 +537,8 @@ namespace AlpWareStudio.Localay
                                     (_ocrScene.Latest.HasSameText(scene) ||
                                      (!growing && _ocrScene.Latest.HasSameGeometry(scene) &&
                                       IsTextSimilar(textContent, _lastTextContent, ConfigManager.Instance.GetTextSimilarThreshold(), out _)));
+                                bool supersededGameText = MainWindow.Instance.IsCapturingGameWindow &&
+                                    _ocrScene.Latest is { } previousScene && !previousScene.HasSameTranslationUnits(scene);
                                 if (_ocrScene.Observe(scene))
                                 {
                                     // OCR can also change without a pixel delta (language/noise).
@@ -550,10 +552,10 @@ namespace AlpWareStudio.Localay
                                             text.SourceFrameCurrent = false;
                                     }
                                     _translationRetry.Reset();
-                                    // Let the bounded current request finish for stationary
-                                    // blocks it still serves. Changed objects stay hidden and
-                                    // the newest OCR is deferred until ownership is released.
-                                    if (!_textObjects.Any(t => t.SourceFrameCurrent))
+                                    // A stationary HUD must not keep an obsolete dialogue request
+                                    // alive. Preserve verified visuals, but release translation and
+                                    // prefetch ownership so only the latest game text proceeds.
+                                    if (supersededGameText || !_textObjects.Any(t => t.SourceFrameCurrent))
                                         InvalidatePendingWork(discardSourceFrame: false);
                                 }
                                 if (!AreOverlaysCurrent)
@@ -1227,9 +1229,9 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        // The texts DisplayOcrResults will turn into text objects, in the same order: same fragment-size
-        // filter and the same merging. The prefetch translates these, so its cache keys match.
-        private List<string> GetTranslatableTexts(JsonElement resultsElement)
+        // Match DisplayOcrResults' fragment filter and merging so prefetch cache keys
+        // stay identical. Game prefetch may prioritize caption candidates before batching.
+        private List<string> GetTranslatableTexts(JsonElement resultsElement, bool prioritizeGame = false)
         {
             var texts = new List<string>();
             if (resultsElement.ValueKind != JsonValueKind.Array)
@@ -1249,7 +1251,7 @@ namespace AlpWareStudio.Localay
                 if (text.Length < minTextFragmentSize)
                     continue;
 
-                if (autoMergeEnabled)
+                if (autoMergeEnabled || prioritizeGame)
                 {
                     var (x, y, width, height) = ReadRect(item);
                     int? bubbleId = item.TryGetProperty("bubble_id", out JsonElement bubbleElement) && bubbleElement.ValueKind == JsonValueKind.Number
@@ -1265,11 +1267,35 @@ namespace AlpWareStudio.Localay
 
             if (autoMergeEnabled && tempBlocks.Count > 0)
             {
-                texts.AddRange(MergeOverlappingTextBlocks(tempBlocks).blocks.Select(b => b.Text));
+                var (merged, bounds) = MergeOverlappingTextBlocks(tempBlocks);
+                // Match DisplayOcrResults: priority must use original source bounds,
+                // not any geometry expanded while merging adjacent text blocks.
+                tempBlocks = merged.Select((block, i) => new TempTextBlock { Text = block.Text,
+                    X = bounds[i].MinX, Y = bounds[i].MinY, Width = bounds[i].MaxX - bounds[i].MinX,
+                    Height = bounds[i].MaxY - bounds[i].MinY }).ToList();
             }
+
+            if (prioritizeGame)
+                return OrderGameTranslationTexts(tempBlocks.Select(b => new OcrSceneBlock(b.Text, b.X, b.Y, b.Width, b.Height)))
+                    .Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+            if (autoMergeEnabled) texts.AddRange(tempBlocks.Select(b => b.Text));
 
             // CreateTextObjectAtPosition skips blank text
             return texts.Where(t => !string.IsNullOrWhiteSpace(t)).ToList();
+        }
+
+        private string[] OrderGameTranslationTexts(IEnumerable<OcrSceneBlock> sourceBlocks)
+        {
+            var blocks = sourceBlocks.ToArray();
+            var texts = blocks.Select(b => b.Text).ToArray();
+            if (!MainWindow.Instance.IsCapturingGameWindow) return texts;
+            // SourceBlock/OCR rectangles are physical capture pixels. Use the same
+            // render DPI as the overlay rather than comparing them with logical DIPs.
+            var monitor = MonitorWindow.Instance;
+            DpiHelper.GetWindowRenderDpi(monitor, out double scaleX, out double scaleY);
+            var boxes = blocks.Select(b => new OverlayBox(b.X, b.Y, b.Width, b.Height)).ToArray();
+            return SubtitlePanelPolicy.TranslationOrder(boxes, texts, monitor.ActualWidth * scaleX, monitor.ActualHeight * scaleY)
+                .Select(i => texts[i]).ToArray();
         }
 
         // Create a text object at the specified position with confidence info
@@ -1328,7 +1354,7 @@ namespace AlpWareStudio.Localay
                 Color bgColor = ConfigManager.Instance.GetOverlayBackgroundColor();
                 System.Windows.Media.Imaging.BitmapSource? erasedPatch = null;
                 Rect erasedBounds = Rect.Empty;
-                if (ConfigManager.Instance.IsAutoSetOverlayBackground() && sourceBitmap != null)
+                if (!MainWindow.Instance.IsCapturingGameWindow && ConfigManager.Instance.IsAutoSetOverlayBackground() && sourceBitmap != null)
                 {
                     try
                     {
@@ -2356,7 +2382,7 @@ namespace AlpWareStudio.Localay
                 bool readCache = cacheEnabled && !_bypassTranslationCacheOnce;
                 bool bypass = _bypassTranslationCacheOnce;
                 _bypassTranslationCacheOnce = false;
-                string cacheContext = BuildBlockCacheContext(requestContext, previousContext);
+                string cacheContext = BuildBlockCacheContext(requestContext, previousContext, currentService);
                 if (cacheEnabled) TranslationCache.Instance.UseContext(cacheContext);
                 var objects = _textObjects.ToArray();
                 foreach (var textObject in objects)
@@ -2368,27 +2394,42 @@ namespace AlpWareStudio.Localay
                 MonitorWindow.Instance.RefreshOverlays();
                 if (missing.Length > 0)
                 {
+                    bool presentReadyBatches = MainWindow.Instance.IsCapturingGameWindow;
+                    void ApplyReadyTranslations(IReadOnlyDictionary<string, TranslationBlockResult> translations)
+                    {
+                        EnsureCurrentTranslation(operation, requestContext);
+                        foreach (var textObject in missing)
+                        {
+                            if (!translations.TryGetValue(textObject.Text, out var result)) continue;
+                            if (string.IsNullOrWhiteSpace(result.Text)) { failure ??= result.Failure; continue; }
+                            // Both stable identity and exact source must still belong to this scene.
+                            var current = _textObjects.FirstOrDefault(t => t.ID == textObject.ID && t.Text == textObject.Text);
+                            if (current == null) continue;
+                            current.TextTranslated = result.Text;
+                            current.TranslationContext = requestContext;
+                            current.FlowDirection = result.Text.StartsWith('\u200F') ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
+                            current.UpdateUIElement();
+                        }
+                    }
+                    Task PresentReadyTranslations(IReadOnlyDictionary<string, TranslationBlockResult> translations) =>
+                        Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            // Recheck after dispatch: focus, scene or settings may have changed
+                            // while this UI update was queued. Rendering retains freshness guards.
+                            ApplyReadyTranslations(translations);
+                            MonitorWindow.Instance.RefreshOverlays();
+                        }).Task;
                     LogTranslationRequest(currentService, currentModel, missing,
-                        (missing.Length + 14) / 15, objects.Length - missing.Length);
+                        (missing.Length + GameTranslationProfile.BatchSize(currentService, ConfigManager.Instance.GetOllamaModel()) - 1) /
+                            GameTranslationProfile.BatchSize(currentService, ConfigManager.Instance.GetOllamaModel()), objects.Length - missing.Length);
                     // The foreground joins matching units already owned by prefetch,
                     // including partial overlap and a different OCR order.
-                    var translations = await TranslateBlocksAsync(missing.Select(t => t.Text).ToArray(),
+                    var translations = await TranslateBlocksAsync(OrderGameTranslationTexts(missing.Select(t => t.SourceBlock)),
                         cacheContext, _translationEpoch, translationService, currentService,
-                        prompt, previousContext, gameInfo, sourceLanguage, targetLanguage, cacheEnabled, readCache, operation.Token, forceRefresh: bypass);
+                        prompt, previousContext, gameInfo, sourceLanguage, targetLanguage, cacheEnabled, readCache, operation.Token,
+                        forceRefresh: bypass, onReady: presentReadyBatches ? PresentReadyTranslations : null);
                     EnsureCurrentTranslation(operation, requestContext);
-                    foreach (var textObject in missing)
-                    {
-                        if (!translations.TryGetValue(textObject.Text, out var result)) continue;
-                        if (string.IsNullOrWhiteSpace(result.Text)) { failure ??= result.Failure; continue; }
-                        // Never select a different object by output position. Both stable
-                        // identity and exact source must still belong to the current scene.
-                        var current = _textObjects.FirstOrDefault(t => t.ID == textObject.ID && t.Text == textObject.Text);
-                        if (current == null) continue;
-                        current.TextTranslated = result.Text;
-                        current.TranslationContext = requestContext;
-                        current.FlowDirection = result.Text.StartsWith('\u200F') ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
-                        current.UpdateUIElement();
-                    }
+                    if (!presentReadyBatches) ApplyReadyTranslations(translations);
                 }
                 else OcrTiming.Log("3. Translation reused", $"{objects.Length} block(s)");
                 EnsureCurrentTranslation(operation, requestContext);
@@ -2469,8 +2510,9 @@ namespace AlpWareStudio.Localay
         private string BuildTranslationCacheContext(string service, string model, string prompt, string gameInfo) =>
             JsonSerializer.Serialize(new { service, model, source = GetSourceLanguage(), target = GetTargetLanguage(), prompt, gameInfo });
 
-        private static string BuildBlockCacheContext(string settings, object previousContext) =>
-            TranslationBlockProtocol.CacheContext(settings, previousContext);
+        private static string BuildBlockCacheContext(string settings, object previousContext, string service) =>
+            TranslationBlockProtocol.CacheContext(settings, GameTranslationProfile.MeaningContext(service, previousContext,
+                ConfigManager.Instance.GetOllamaModel()));
 
         private void EnsureCurrentTranslation(PipelineLifetime.Lease operation, string requestContext, bool requireStarted = true)
         {
@@ -2497,7 +2539,7 @@ namespace AlpWareStudio.Localay
                     !ConfigManager.Instance.IsTranslationCacheEnabled() ||
                     !MainWindow.Instance.GetIsStarted() || !MainWindow.Instance.GetTranslateEnabled() ||
                     _prefetchTask is { IsCompleted: false }) return;
-                var texts = GetTranslatableTexts(results);
+                var texts = GetTranslatableTexts(results, prioritizeGame: MainWindow.Instance.IsCapturingGameWindow);
                 if (texts.Count == 0) return;
                 string service = ConfigManager.Instance.GetCurrentTranslationService();
                 string prompt = GetLlmPrompt().Replace("source_language", MapLanguageCode(GetSourceLanguage()))
@@ -2505,7 +2547,7 @@ namespace AlpWareStudio.Localay
                 string gameInfo = ConfigManager.Instance.GetGameInfo();
                 string settings = BuildTranslationCacheContext(service, ConfigManager.Instance.GetCurrentTranslationModel(), prompt, gameInfo);
                 var previousContext = GetPreviousContext();
-                string cacheContext = BuildBlockCacheContext(settings, previousContext);
+                string cacheContext = BuildBlockCacheContext(settings, previousContext, service);
                 TranslationCache.Instance.UseContext(cacheContext);
                 var missing = texts.Where(t => !TranslationCache.Instance.TryGet(cacheContext, t, out _)).ToArray();
                 if (missing.Length == 0) return;
@@ -2534,7 +2576,8 @@ namespace AlpWareStudio.Localay
         private Task<IReadOnlyDictionary<string, TranslationBlockResult>> TranslateBlocksAsync(IReadOnlyList<string> texts,
             string cacheContext, long epoch, ITranslationService service, string serviceName,
             string prompt, object previousContext, string gameInfo, string sourceLanguage, string targetLanguage,
-            bool cacheEnabled, bool readCache, CancellationToken cancellation, bool forceRefresh = false)
+            bool cacheEnabled, bool readCache, CancellationToken cancellation, bool forceRefresh = false,
+            Func<IReadOnlyDictionary<string, TranslationBlockResult>, Task>? onReady = null)
         {
             string flightContext = JsonSerializer.Serialize(new { cacheContext, epoch, refresh = forceRefresh ? Guid.NewGuid().ToString() : null });
             return _translationBatches.TranslateAsync(flightContext, texts, async (blocks, token) =>
@@ -2571,7 +2614,7 @@ namespace AlpWareStudio.Localay
                     }
                 }
                 return new TranslationBatchResult(translated, failure);
-            }, cancellation);
+            }, cancellation, onReady, batchSize: GameTranslationProfile.BatchSize(serviceName, ConfigManager.Instance.GetOllamaModel()));
         }
 
         private static readonly HashSet<string> RtlLanguages = new HashSet<string> {
@@ -2818,6 +2861,10 @@ namespace AlpWareStudio.Localay
 
                 using JsonDocument doc = JsonDocument.Parse(response);
                 var root = doc.RootElement;
+
+                if (currentService == "Ollama" && root.ValueKind == JsonValueKind.Object &&
+                    root.TryGetProperty("translations", out _))
+                    return (response, true);
 
                 // ChatGPT format: {"translated_text": "...", ...}
                 if (currentService == "ChatGPT")

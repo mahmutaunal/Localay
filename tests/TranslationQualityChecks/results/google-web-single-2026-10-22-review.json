@@ -1,0 +1,1186 @@
+{
+  "corpusSha256": "a4016e7b930cc9b575fdf2a3990429f55571a280d31c73ca47b84de5794045e8",
+  "status": "reviewed_by_assistant_pilot_rejected",
+  "acceptanceCriteria": {
+    "version": "pilot-v1",
+    "requiredOutputCount": 60,
+    "standaloneCaseCount": 50,
+    "contextProbeCount": 10,
+    "maximumCriticalErrors": 0,
+    "maximumMajorErrors": 0,
+    "maximumProtectedTokenChanges": 0,
+    "minimumNaturalStandaloneCases": 45,
+    "semanticLabels": [
+      "correct",
+      "minor_wording",
+      "major",
+      "critical",
+      "unavailable"
+    ],
+    "naturalnessLabels": [
+      "natural",
+      "awkward",
+      "unreadable",
+      "unavailable"
+    ],
+    "independentHumanReviewCompleted": false
+  },
+  "provenance": {
+    "kind": "engine_output",
+    "provider": "Google Translate",
+    "mode": "web",
+    "sourceLanguage": "en",
+    "targetLanguage": "tr",
+    "requestLayout": "single",
+    "adapter": "production GoogleTranslateFreeClient",
+    "cacheEnabled": false,
+    "runnerAssemblySha256": "f4ee543ec4ad788acbca40ac552447eb788f7bd5d95c9163240033e7d1ab9178",
+    "startedUtc": "2026-10-22T20:26:54.360025+00:00",
+    "finishedUtc": "2026-10-22T20:27:58.598376+00:00",
+    "timingScope": "client call including request spacing/retries/network; not end-to-end game latency"
+  },
+  "provenanceIndependentlyVerified": false,
+  "qualityScore": {
+    "standaloneDenominator": 50,
+    "standaloneSemantics": {
+      "correct": 35,
+      "minor_wording": 8,
+      "major": 6,
+      "unavailable": 1
+    },
+    "standaloneNaturalness": {
+      "natural": 38,
+      "awkward": 12
+    },
+    "contextProbesExcludedFromScore": 10,
+    "structuralIssueCount": 0,
+    "decision": "pilot_rejected",
+    "reason": "Major meaning/terminology errors present; naturalness below 45/50; one standalone item is semantically indeterminate without context.",
+    "meaningAccuracyPercentage": null
+  },
+  "endToEndLatencyMeasured": false,
+  "providedOutputCount": 60,
+  "cases": [
+    {
+      "id": "ui-01",
+      "category": "ui",
+      "source": "Continue game",
+      "meaning": "Mevcut oyuna devam etme seçeneği.",
+      "acceptableExamples": [
+        "Oyuna devam et"
+      ],
+      "criticalRisk": "Yeni oyun başlatma anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Oyuna devam et",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-02",
+      "category": "ui",
+      "source": "Load last checkpoint",
+      "meaning": "En son kontrol noktasındaki kayıt yüklenir.",
+      "acceptableExamples": [
+        "Son kontrol noktasını yükle"
+      ],
+      "criticalRisk": "Oyunu kaydetme ile yüklemeyi karıştırmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Son kontrol noktasını yükle",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-03",
+      "category": "ui",
+      "source": "Overwrite this save?",
+      "meaning": "Kullanıcıya mevcut kaydın üzerine yazmak isteyip istemediği sorulur.",
+      "acceptableExamples": [
+        "Bu kaydın üzerine yazılsın mı?"
+      ],
+      "criticalRisk": "Yeni kayıt oluşturulduğunu kesin bir olay gibi söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu kaydetmenin üzerine yazılsın mı?",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Kaydın üzerine yazma sorusu korunuyor; “bu kaydetmenin” arayüzde doğal değil."
+    },
+    {
+      "id": "ui-04",
+      "category": "ui",
+      "source": "Unsaved progress will be lost.",
+      "meaning": "Kaydedilmemiş ilerleme kaybolacaktır.",
+      "acceptableExamples": [
+        "Kaydedilmemiş ilerleme kaybolacak."
+      ],
+      "criticalRisk": "Kaydedilmiş ilerlemenin de silineceğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Kaydedilmemiş ilerleme kaybolacaktır.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-05",
+      "category": "ui",
+      "source": "Hold to confirm",
+      "meaning": "Onaylamak için düğmeye basılı tutulur.",
+      "acceptableExamples": [
+        "Onaylamak için basılı tut"
+      ],
+      "criticalRisk": "Tek dokunuş yeterliymiş gibi çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Onaylamak için basılı tutun",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-06",
+      "category": "ui",
+      "source": "Invert vertical look",
+      "meaning": "Kamera bakışının dikey yönü ters çevrilir.",
+      "acceptableExamples": [
+        "Dikey bakışı ters çevir"
+      ],
+      "criticalRisk": "Ekranın kendisini döndürme anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Dikey görünümü ters çevir",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Ters çevirme fikri var; “dikey görünüm” kamera bakış yönünü yeterince açık adlandırmıyor. Kesin anlam tersliği olarak puanlanmadı."
+    },
+    {
+      "id": "ui-07",
+      "category": "ui",
+      "source": "Subtitles for dialogue only",
+      "meaning": "Altyazılar yalnızca konuşmalarda gösterilir.",
+      "acceptableExamples": [
+        "Yalnızca konuşma altyazıları"
+      ],
+      "criticalRisk": "Konuşma dışı bütün seslerin de yazıldığını söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Yalnızca diyalog için altyazılar",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-08",
+      "category": "ui",
+      "source": "Restore default settings",
+      "meaning": "Ayarları varsayılan değerlerine geri döndürme eylemi.",
+      "acceptableExamples": [
+        "Varsayılan ayarları geri yükle"
+      ],
+      "criticalRisk": "Kayıt dosyalarını geri yükleme anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Varsayılan ayarları geri yükle",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-09",
+      "category": "ui",
+      "source": "Return to title screen",
+      "meaning": "Oyunun başlık veya ana giriş ekranına dönülür.",
+      "acceptableExamples": [
+        "Başlık ekranına dön"
+      ],
+      "criticalRisk": "İşletim sistemi masaüstüne çıkma ile karıştırmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Başlık ekranına dön",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "ui-10",
+      "category": "ui",
+      "source": "Purchase unavailable while offline",
+      "meaning": "Çevrimdışıyken satın alma yapılamaz.",
+      "acceptableExamples": [
+        "Çevrimdışıyken satın alınamaz"
+      ],
+      "criticalRisk": "Ürünün çevrimdışı kullanılmasının yasak olduğunu uydurmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Satın alma işlemi çevrimdışıyken yapılamıyor",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-01",
+      "category": "instruction",
+      "source": "Do not release the prisoner.",
+      "meaning": "Tutuklu serbest bırakılmamalıdır.",
+      "acceptableExamples": [
+        "Tutukluyu serbest bırakma."
+      ],
+      "criticalRisk": "Olumsuzluğu kaybetmek kritik hatadır.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Mahkûmu serbest bırakmayın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-02",
+      "category": "instruction",
+      "source": "You cannot fast travel while enemies are nearby.",
+      "meaning": "Yakında düşman varken hızlı seyahat mümkün değildir.",
+      "acceptableExamples": [
+        "Yakında düşmanlar varken hızlı seyahat edemezsin."
+      ],
+      "criticalRisk": "Kısıtlamanın koşulunu tersine çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Düşmanlar yakındayken hızlı seyahat edemezsiniz.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-03",
+      "category": "instruction",
+      "source": "Defeat the guards without raising the alarm.",
+      "meaning": "Muhafızlar alarm verilmeden yenilmelidir.",
+      "acceptableExamples": [
+        "Alarmı tetiklemeden muhafızları yen."
+      ],
+      "criticalRisk": "Alarm verme eylemini bir hedefe dönüştürmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Alarmı yükseltmeden gardiyanları yen.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "“Raise the alarm” alarmı tetiklemek/vermek demek; “alarmı yükseltmek” ses veya alarm seviyesi artırmayı çağrıştırıyor. Olumsuzluk korunmuş olsa da görev eylemi yanlış adlandırılmış."
+    },
+    {
+      "id": "instruction-04",
+      "category": "instruction",
+      "source": "Unless you lower the bridge, the caravan cannot cross.",
+      "meaning": "Kervanın geçebilmesi köprünün indirilmesine bağlıdır.",
+      "acceptableExamples": [
+        "Köprüyü indirmezsen kervan geçemez."
+      ],
+      "criticalRisk": "Koşul ve olumsuzluğu ters çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Köprüyü indirmediğiniz sürece kervan geçemez.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-05",
+      "category": "instruction",
+      "source": "Only the host can start this mission.",
+      "meaning": "Görevi başlatma yetkisi yalnızca oturum sahibindedir.",
+      "acceptableExamples": [
+        "Bu görevi yalnızca oturum sahibi başlatabilir."
+      ],
+      "criticalRisk": "Bütün oyuncuların başlatabileceğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu göreve yalnızca toplantı sahibi başlayabilir.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Oturum sahibi yerine “toplantı sahibi” kullanılmış. Yalnızca koşulu korunuyor fakat oyun rolü yanlış alan terimiyle aktarılıyor."
+    },
+    {
+      "id": "instruction-06",
+      "category": "instruction",
+      "source": "Destroy the generator before opening the gate.",
+      "meaning": "Önce jeneratör yok edilir, sonra kapı açılır.",
+      "acceptableExamples": [
+        "Kapıyı açmadan önce jeneratörü yok et."
+      ],
+      "criticalRisk": "İşlem sırasını değiştirmek kritik hatadır.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Kapıyı açmadan önce jeneratörü yok edin.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-07",
+      "category": "instruction",
+      "source": "Keep the target alive until extraction.",
+      "meaning": "Tahliye gerçekleşene kadar hedef hayatta kalmalıdır.",
+      "acceptableExamples": [
+        "Tahliyeye kadar hedefi hayatta tut."
+      ],
+      "criticalRisk": "Hedefi öldürme talimatı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Çıkarılana kadar hedefi canlı tutun.",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Hedefi hayatta tutma ve süre sınırı korunuyor. “Çıkarılana kadar” tahliye bağlamını doğal aktarmıyor; kaynakta tahliye ayrıntısı verilmediği için büyük hata sayılmadı."
+    },
+    {
+      "id": "instruction-08",
+      "category": "instruction",
+      "source": "Taking damage interrupts healing.",
+      "meaning": "Hasar alınması iyileşmeyi keser.",
+      "acceptableExamples": [
+        "Hasar almak iyileşmeyi kesintiye uğratır."
+      ],
+      "criticalRisk": "İyileşmenin hasarı engellediğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Hasar almak iyileşmeyi kesintiye uğratır.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-09",
+      "category": "instruction",
+      "source": "This door can only be opened from the other side.",
+      "meaning": "Kapı sadece öteki taraftan açılabilir.",
+      "acceptableExamples": [
+        "Bu kapı yalnızca diğer taraftan açılabilir."
+      ],
+      "criticalRisk": "Bu taraftan açılabileceğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu kapı sadece diğer taraftan açılabilir.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "instruction-10",
+      "category": "instruction",
+      "source": "You may leave, but your reward will be forfeited.",
+      "meaning": "Ayrılmak mümkündür; bunun sonucu ödülden vazgeçilmesidir.",
+      "acceptableExamples": [
+        "Ayrılabilirsin ama ödülünü kaybedersin."
+      ],
+      "criticalRisk": "Ayrılmanın yasak olduğunu veya ödül verileceğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Ayrılabilirsiniz ancak ödülünüz kaybedilecektir.",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Ayrılma serbestliği ve ödülü kaybetme sonucu korunuyor; “ödülünüz kaybedilecektir” doğal değil."
+    },
+    {
+      "id": "dialogue-01",
+      "category": "dialogue",
+      "source": "I've got your back.",
+      "meaning": "Konuşmacı karşısındakini koruyacağını veya destekleyeceğini söyler.",
+      "acceptableExamples": [
+        "Arkanı kolluyorum."
+      ],
+      "criticalRisk": "Sırtı fiziksel olarak ele geçirme anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Arkanı kolladım.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Mevcut destek/güvence deyimi geçmişte yapılmış bir koruma eylemine dönüşüyor: “kolladım”. Cümle doğal görünüyor ama zaman ve söylem amacı değişmiş."
+    },
+    {
+      "id": "dialogue-02",
+      "category": "dialogue",
+      "source": "We're not out of the woods yet.",
+      "meaning": "Tehlike henüz geçmemiştir.",
+      "acceptableExamples": [
+        "Henüz tehlikeyi atlatmadık."
+      ],
+      "criticalRisk": "Yalnızca ormandan fiziksel çıkışı anlatmak bağlam olmadan belirsiz olabilir; deyim okumasını değerlendir.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Henüz ormandan çıkmadık.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Küme bunu bağımsız örnek saymış olsa da kaynak literal orman çıkışı veya tehlikeyi atlatma deyimi olabilir. Çıktı literal okumayı karşılıyor; dış bağlam olmadan büyük hata ilan edilmedi. Deyim hedefi için yetersiz, kesin anlam puanı verilmedi. Bu örnek paydadan sessizce çıkarılmadı."
+    },
+    {
+      "id": "dialogue-03",
+      "category": "dialogue",
+      "source": "That was a close call.",
+      "meaning": "Tehlike kıl payı atlatılmıştır.",
+      "acceptableExamples": [
+        "Ucuz atlattık."
+      ],
+      "criticalRisk": "Telefon çağrısı anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu yakın bir karardı.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "“Close call” tehlikeyi kıl payı atlatmayı anlatır. “Yakın bir karar” bu olayı aktarmıyor."
+    },
+    {
+      "id": "dialogue-04",
+      "category": "dialogue",
+      "source": "Don't push your luck.",
+      "meaning": "Karşıdaki kişi şansını daha fazla zorlamaması için uyarılır.",
+      "acceptableExamples": [
+        "Şansını zorlama."
+      ],
+      "criticalRisk": "Şansı fiziksel olarak itme anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Şansınızı zorlamayın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "dialogue-05",
+      "category": "dialogue",
+      "source": "You sold us out for a handful of coins.",
+      "meaning": "Konuşmacı az para karşılığında ihanete uğradıklarını söyler.",
+      "acceptableExamples": [
+        "Bizi bir avuç para için sattın."
+      ],
+      "criticalRisk": "Bir mal satışından söz ediyormuş gibi ihaneti kaybetmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bir avuç kuruşa bizi sattın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "dialogue-06",
+      "category": "dialogue",
+      "source": "I should have listened to you.",
+      "meaning": "Geçmişte dinlememiş olmaktan duyulan pişmanlık.",
+      "acceptableExamples": [
+        "Seni dinlemeliydim."
+      ],
+      "criticalRisk": "Gelecekte dinleme vaadine dönüştürmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Seni dinlemeliydim.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "dialogue-07",
+      "category": "dialogue",
+      "source": "If I hadn't missed, he'd still be alive.",
+      "meaning": "Konuşmacının ıskalaması nedeniyle bir başkası ölmüştür; geçmişe aykırı koşul.",
+      "acceptableExamples": [
+        "Iskalamasaydım hâlâ hayatta olurdu."
+      ],
+      "criticalRisk": "Ölüm ile hayatta kalmayı veya koşulu tersine çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Kaçırmasaydım hâlâ hayatta olacaktı.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "dialogue-08",
+      "category": "dialogue",
+      "source": "You didn't think I'd leave you here, did you?",
+      "meaning": "Konuşmacı karşısındakini orada bırakmayacağını ima eden soru sorar.",
+      "acceptableExamples": [
+        "Seni burada bırakacağımı düşünmedin, değil mi?"
+      ],
+      "criticalRisk": "Karşıdakini kesin olarak terk ettiğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Seni burada bırakacağımı düşünmedin değil mi?",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "dialogue-09",
+      "category": "dialogue",
+      "source": "So much for a quiet entrance.",
+      "meaning": "Sessiz giriş planının bozulduğuna yönelik alaycı yorum.",
+      "acceptableExamples": [
+        "Sessiz giriş planı da böylece yattı."
+      ],
+      "criticalRisk": "Sessizliğin başarıldığını söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Sessiz bir giriş için bu kadar.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Sessiz giriş planının bozulduğuna ilişkin alay kayboluyor. “Sessiz bir giriş için bu kadar” doğal ve anlaşılır bir karşılık değil."
+    },
+    {
+      "id": "dialogue-10",
+      "category": "dialogue",
+      "source": "I'd rather lose the crown than lose you.",
+      "meaning": "Karşıdaki kişiyi kaybetmektense tacı kaybetme tercihi.",
+      "acceptableExamples": [
+        "Seni kaybetmektense tacı kaybetmeyi tercih ederim."
+      ],
+      "criticalRisk": "Tercihin yönünü tersine çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Seni kaybetmektense tacı kaybetmeyi tercih ederim.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "context-01",
+      "category": "context",
+      "source": "Charge!",
+      "meaning": "Tek başına saldırı emri, şarj etme veya ücretlendirme gibi farklı okumalar mümkündür.",
+      "acceptableExamples": [
+        "Hücum!"
+      ],
+      "criticalRisk": "Hedef okuma dış bağlama bağlıdır; tek bir karşılığı zorunlu tutma.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Şarj!",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "“Şarj!” elektrik/şarj okumasını seçiyor; saldırı emri hedefini karşılamaz. Kaynak tek başına çok anlamlı olduğundan ana başarı oranına katılmadı. Şarj emri için de ifade eksiltili."
+    },
+    {
+      "id": "context-02",
+      "category": "context",
+      "source": "Watch the bat.",
+      "meaning": "Bat sözcüğü hayvan veya spor sopası olabilir.",
+      "acceptableExamples": [
+        "Yarasaya dikkat et."
+      ],
+      "criticalRisk": "Sopa okumasını bağlam olmadan kesin hata sayma.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Sopayı izle.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Sopa okuması seçilmiş; hayvan okuması da mümkün. Dış bağlam olmadan hatalı olduğu söylenemez."
+    },
+    {
+      "id": "context-03",
+      "category": "context",
+      "source": "The party is waiting.",
+      "meaning": "Party bir maceracı grubu veya sosyal etkinlik olabilir.",
+      "acceptableExamples": [
+        "Grup bekliyor."
+      ],
+      "criticalRisk": "Oyuncu grubu hedef anlamdır; etkinlik okuması da kaynakta mümkündür.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Parti bekliyor.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "“Parti” sosyal/politik okumaya açık; maceracı grubu hedefi açık aktarılmıyor. Kaynak tek başına grup türünü belirtmiyor."
+    },
+    {
+      "id": "context-04",
+      "category": "context",
+      "source": "She left the bank.",
+      "meaning": "Bank bir banka veya nehir kıyısı olabilir.",
+      "acceptableExamples": [
+        "Bankadan ayrıldı."
+      ],
+      "criticalRisk": "Nehir kıyısı okumasını bağlam olmadan kesin hata sayma.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Bankadan ayrıldı.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Banka okuması seçilmiş; nehir kıyısı okuması da kaynakta mümkün."
+    },
+    {
+      "id": "context-05",
+      "category": "context",
+      "source": "Take the right path.",
+      "meaning": "Right sağ yönü veya doğru seçeneği belirtebilir.",
+      "acceptableExamples": [
+        "Sağdaki yolu seç."
+      ],
+      "criticalRisk": "Doğru yol okuması da kaynakta mümkündür.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Doğru yolu seçin.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Doğru seçenek okuması seçilmiş; sağ yönü okuması da mümkün."
+    },
+    {
+      "id": "context-06",
+      "category": "context",
+      "source": "That's a fine blade.",
+      "meaning": "Fine kaliteli veya ince bir bıçak/kılıcı niteleyebilir.",
+      "acceptableExamples": [
+        "Güzel bir kılıç."
+      ],
+      "criticalRisk": "Nesne türü ve sıfat okuması dış bağlam olmadan kesinleşmez.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Bu çok iyi bir bıçak.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaliteli bıçak okuması makul; ince kılıç gibi farklı okuma dış bağlam ister."
+    },
+    {
+      "id": "context-07",
+      "category": "context",
+      "source": "The seal is broken.",
+      "meaning": "Seal mühür, conta veya deniz hayvanı anlamına gelebilir.",
+      "acceptableExamples": [
+        "Mühür kırılmış."
+      ],
+      "criticalRisk": "Mühür hedef okuma; diğer dilsel okumalar ayrıca işaretlenir.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Mühür kırılmış.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Mühür okuması makul; kaynak nesneyi açıkça tanımlamıyor."
+    },
+    {
+      "id": "context-08",
+      "category": "context",
+      "source": "Drop it.",
+      "meaning": "Bir nesneyi bırakma veya bir konuyu kapatma talimatı olabilir.",
+      "acceptableExamples": [
+        "Bırak onu."
+      ],
+      "criticalRisk": "Nesne ve konuşma hedefi kaynaktan kesinleşmez.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Bırak onu.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Bırakma talimatı nesne veya konu için kullanılabilir; kaynak da bu ayrımı yapmıyor."
+    },
+    {
+      "id": "context-09",
+      "category": "context",
+      "source": "Nice shot.",
+      "meaning": "Gerçek övgü veya alaycı tepki olabilir.",
+      "acceptableExamples": [
+        "Güzel atış."
+      ],
+      "criticalRisk": "Alay tonunu bilmemeyi kesin anlam hatası sayma.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "Güzel atış.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Övgü olarak makul. Alay tonu kaynak metinden kesinleşmez."
+    },
+    {
+      "id": "context-10",
+      "category": "context",
+      "source": "He is down.",
+      "meaning": "Kişi düşmüş, etkisiz hâle gelmiş veya üzgün olabilir.",
+      "acceptableExamples": [
+        "Yere düştü."
+      ],
+      "criticalRisk": "Öldüğünü kesinleştirmek kaynakta verilmeyen bilgi ekleyebilir.",
+      "protectedTokens": [],
+      "contextDependent": true,
+      "reviewContext": "Oyun bağlamı bu blokta verilmemiştir; hedef okuma kesin anlam olarak puanlanmaz.",
+      "providedTranslation": "O aşağıda.",
+      "structuralFlags": [],
+      "semanticReview": "unavailable",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Fiziksel olarak aşağıda bulunma okuması seçilmiş; yere düşme/etkisiz kalma hedefi kesin aktarılmıyor. Kaynak tek başına bu ayrımı çözmez."
+    },
+    {
+      "id": "item-01",
+      "category": "item",
+      "source": "Armor penetration",
+      "meaning": "Saldırının zırhı delme özelliği veya değeri.",
+      "acceptableExamples": [
+        "Zırh delme"
+      ],
+      "criticalRisk": "Zırh giyme veya zırh kazanma ile karıştırmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Zırh nüfuzu",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Zırhı delme fikri sezilebilir; “zırh nüfuzu” Türkçe oyun terimi olarak doğal değil. Büyük hata olarak puanlanmadı."
+    },
+    {
+      "id": "item-02",
+      "category": "item",
+      "source": "Damage over time",
+      "meaning": "Hasarın zaman içinde uygulanması.",
+      "acceptableExamples": [
+        "Zamanla verilen hasar"
+      ],
+      "criticalRisk": "Anlık hasar olarak çevirmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Zamanla hasar",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Zamana yayılan hasar fikri korunuyor; “zamanla hasar” eksiltili ve zayıf bir etiket."
+    },
+    {
+      "id": "item-03",
+      "category": "item",
+      "source": "Cooldown reduction",
+      "meaning": "Yeteneklerin yeniden kullanılabilmesi için gereken beklemenin azalması.",
+      "acceptableExamples": [
+        "Bekleme süresi azaltma"
+      ],
+      "criticalRisk": "Sıcaklığın fiziksel olarak düşürülmesiyle karıştırmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "terminologyGroup": "cooldown",
+      "providedTranslation": "Bekleme süresinde azalma",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "item-04",
+      "category": "item",
+      "source": "Bound to your account",
+      "meaning": "Eşyanın hesaba bağlanması.",
+      "acceptableExamples": [
+        "Hesabına bağlı"
+      ],
+      "criticalRisk": "Fiziksel olarak bağlama veya hesap borcu anlamı vermemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Hesabınıza bağlı",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "item-05",
+      "category": "item",
+      "source": "This item is consumed on use.",
+      "meaning": "Eşya kullanıldığında tüketilir.",
+      "acceptableExamples": [
+        "Bu eşya kullanıldığında tüketilir."
+      ],
+      "criticalRisk": "Sınırsız yeniden kullanılabildiğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu madde kullanıldıkça tüketilir.",
+      "structuralFlags": [],
+      "semanticReview": "major",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kullanım anında tüketilme yerine “kullanıldıkça” denerek aşamalı tüketim çağrışımı eklenmiş. “Madde” de eşya için zayıf bir terim. Akıcı cümle, eşyanın kullanım davranışını güvenilir aktarmıyor."
+    },
+    {
+      "id": "item-06",
+      "category": "item",
+      "source": "Grants immunity to poison, not to bleeding.",
+      "meaning": "Zehre bağışıklık verir fakat kanamaya vermez.",
+      "acceptableExamples": [
+        "Zehre bağışıklık sağlar, kanamaya sağlamaz."
+      ],
+      "criticalRisk": "Bağışıklıkları birbirine aktarmak kritik hatadır.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Kanamaya değil zehire karşı bağışıklık kazandırır.",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Zehir ve kanama ayrımı doğru; “zehire” yerine “zehre” daha doğal. Anlam hatası olarak sayılmadı."
+    },
+    {
+      "id": "item-07",
+      "category": "item",
+      "source": "Revive a fallen ally",
+      "meaning": "Düşmüş veya etkisiz hâle gelmiş müttefiki yeniden savaşa döndürme.",
+      "acceptableExamples": [
+        "Düşen bir müttefiki canlandır"
+      ],
+      "criticalRisk": "Müttefiki düşürme emrine dönüştürmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Düşmüş bir müttefiki dirilt",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "item-08",
+      "category": "item",
+      "source": "Life steal applies only to weapon damage.",
+      "meaning": "Can çalma yalnızca silah hasarında geçerlidir.",
+      "acceptableExamples": [
+        "Can çalma yalnızca silah hasarına uygulanır."
+      ],
+      "criticalRisk": "Bütün hasar türlerine genişletmemeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Can çalma yalnızca silah hasarı için geçerlidir.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "item-09",
+      "category": "item",
+      "source": "Equipping this ring disables your shield.",
+      "meaning": "Yüzük takıldığında kalkan devre dışı kalır.",
+      "acceptableExamples": [
+        "Bu yüzüğü takmak kalkanını devre dışı bırakır."
+      ],
+      "criticalRisk": "Kalkanı güçlendirdiğini veya etkinleştirdiğini söylememeli.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Bu yüzüğü takmak kalkanınızı devre dışı bırakır.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "item-10",
+      "category": "item",
+      "source": "The Ashen Crown cannot be sold or dismantled.",
+      "meaning": "Ashen Crown adlı eşya satılamaz ve parçalanamaz.",
+      "acceptableExamples": [
+        "Kül Tacı satılamaz veya parçalanamaz."
+      ],
+      "criticalRisk": "Satış ve parçalama yasaklarını kaybetmemeli; eşya adının tutarlılığı ayrıca incelenir.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Ashen Crown satılamaz veya parçalara ayrılamaz.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-01",
+      "category": "format",
+      "source": "Welcome back, {player}!",
+      "meaning": "Oyuncuyu adıyla karşılayan karşılama.",
+      "acceptableExamples": [
+        "Tekrar hoş geldin, {player}!"
+      ],
+      "criticalRisk": "Oyuncu değişkeni bozulmamalı.",
+      "protectedTokens": [
+        "{player}"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Tekrar hoş geldiniz {player}!",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-02",
+      "category": "format",
+      "source": "Press [E] to interact.",
+      "meaning": "E tuşu etkileşim başlatır.",
+      "acceptableExamples": [
+        "Etkileşime geçmek için [E] tuşuna bas."
+      ],
+      "criticalRisk": "Tuş etiketi değişmemeli.",
+      "protectedTokens": [
+        "[E]"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Etkileşim için [E] tuşuna basın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-03",
+      "category": "format",
+      "source": "Defeat {count} enemies with {weapon}.",
+      "meaning": "Belirtilen silahla belirtilen sayıda düşman yenilmelidir.",
+      "acceptableExamples": [
+        "{weapon} ile {count} düşmanı yen."
+      ],
+      "criticalRisk": "İki değişkenin rolleri birbirine aktarılmamalı.",
+      "protectedTokens": [
+        "{count}",
+        "{weapon}"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "{weapon} ile {count} düşmanı mağlup edin.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-04",
+      "category": "format",
+      "source": "Cooldown: 10 seconds. Damage: 250.",
+      "meaning": "Bekleme süresi 10 saniye, hasar değeri 250 olarak gösterilir.",
+      "acceptableExamples": [
+        "Bekleme süresi: 10 saniye. Hasar: 250."
+      ],
+      "criticalRisk": "Bekleme süresi ile hasar değeri yer değiştirmemeli; item-03 ile terim tutarlılığı incelenir.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "terminologyGroup": "cooldown",
+      "providedTranslation": "Bekleme süresi: 10 saniye. Hasar: 250.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-05",
+      "category": "format",
+      "source": "Health below 25% increases damage by 10%.",
+      "meaning": "Can yüzde 25 altındayken hasar yüzde 10 artar.",
+      "acceptableExamples": [
+        "Can %25 altına düştüğünde hasar %10 artar."
+      ],
+      "criticalRisk": "Eşik ve artış oranları birbirine aktarılmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Sağlığın %25'in altında olması hasarı %10 artırır.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-06",
+      "category": "format",
+      "source": "You need 3 keys, not 2.",
+      "meaning": "Gereken anahtar sayısı 2 değil 3.",
+      "acceptableExamples": [
+        "2 değil, 3 anahtara ihtiyacın var."
+      ],
+      "criticalRisk": "Olumsuzluk hangi sayıya aitse korunmalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "2 değil 3 anahtara ihtiyacınız var.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-07",
+      "category": "format",
+      "source": "Quest complete: {0}\nReward: {1} gold",
+      "meaning": "Görev tamamlandı; görev adı ve ödül ayrı değişkenlerle gösterilir.",
+      "acceptableExamples": [
+        "Görev tamamlandı: {0}\nÖdül: {1} altın"
+      ],
+      "criticalRisk": "Görev ve ödül değişkenlerini karıştırmamalı.",
+      "protectedTokens": [
+        "{0}",
+        "{1}"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "Görev tamamlandı: {0}\nÖdül: {1} altın",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-08",
+      "category": "format",
+      "source": "Hold [Shift] and press [E] twice.",
+      "meaning": "Shift basılı tutulurken E tuşuna iki kere basılır.",
+      "acceptableExamples": [
+        "[Shift] basılıyken [E] tuşuna iki kez bas."
+      ],
+      "criticalRisk": "Basılı tutma, tuş ve tekrar sayısı korunmalı.",
+      "protectedTokens": [
+        "[Shift]",
+        "[E]"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "[Shift] tuşunu basılı tutun ve iki kez [E] tuşuna basın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-09",
+      "category": "format",
+      "source": "Earn 100 gold; spend no more than 40.",
+      "meaning": "100 altın kazanılır, harcama en fazla 40 olabilir.",
+      "acceptableExamples": [
+        "100 altın kazan; 40 altından fazlasını harcama."
+      ],
+      "criticalRisk": "Kazanma hedefi ve harcama üst sınırı karıştırılmamalı.",
+      "protectedTokens": [],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "100 altın kazanın; 40'tan fazla harcamayın.",
+      "structuralFlags": [],
+      "semanticReview": "correct",
+      "naturalnessReview": "natural",
+      "reviewNotes": "Kaynak anlamı, olumsuzluk/koşul ve varsa roller korunuyor; Türkçe bu örnekte doğal kabul edildi."
+    },
+    {
+      "id": "format-10",
+      "category": "format",
+      "source": "Deliver {item} to {npc} before day 5.",
+      "meaning": "Eşya belirtilen kişiye 5. günden önce teslim edilir.",
+      "acceptableExamples": [
+        "{item} eşyasını 5. günden önce {npc} kişisine teslim et."
+      ],
+      "criticalRisk": "Alıcı ile eşya ve gün sınırı korunmalı.",
+      "protectedTokens": [
+        "{item}",
+        "{npc}"
+      ],
+      "contextDependent": false,
+      "reviewContext": "Yalnızca bu kaynak blok gönderilir; haricî oyun sahnesi varsayılmaz.",
+      "providedTranslation": "{item}'ı 5. günden önce {npc}'ye teslim edin.",
+      "structuralFlags": [],
+      "semanticReview": "minor_wording",
+      "naturalnessReview": "awkward",
+      "reviewNotes": "Eşya, alıcı ve gün sınırı doğru. Değişkenlere sabit “ı/ye” eklemek doldurulacak ada göre ünlü uyumu sorunu doğurabilir; gerçek ad bilinmediğinden büyük anlam hatası sayılmadı."
+    }
+  ],
+  "reviewer": {
+    "identity": "Codex assistant",
+    "method": "Direct bilingual inspection of observed source/output pairs; no second model or automatic semantic judge.",
+    "independentHumanReview": false,
+    "referenceAuthorAlsoReviewer": true
+  },
+  "timing": {
+    "sampleCount": 60,
+    "scope": "client call including request spacing/retries/network; not end-to-end game latency",
+    "p50Ms": 976.03,
+    "p95NearestRankMs": 1659.62,
+    "minMs": 158.27,
+    "maxMs": 3244.8,
+    "interpretation": "Includes the existing one-second dispatch spacing; not an end-to-end measurement or an isolated network/server benchmark."
+  },
+  "limitations": [
+    "Original synthetic corpus, not an independent public benchmark.",
+    "Assistant authored references and reviewed outputs; ratings are not independent human judgments.",
+    "One single-block run, no rerun or batch-of-15 experiment.",
+    "Free web service does not expose a pinned model revision.",
+    "One nominally standalone example has valid literal and idiomatic readings; retained as unavailable, not removed to improve a percentage.",
+    "No Windows capture, OCR, WPF placement or physical presentation was measured."
+  ]
+}

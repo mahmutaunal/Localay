@@ -7,5 +7,6 @@
     <Compile Include="../../src/SingleResourceCache.cs" Link="SingleResourceCache.cs" />
     <Compile Include="../../src/OverlayPlacementPolicy.cs" Link="OverlayPlacementPolicy.cs" />
     <Compile Include="../../src/TextMaskProtection.cs" Link="TextMaskProtection.cs" />
+    <Compile Include="../../src/SubtitlePanelPolicy.cs" Link="SubtitlePanelPolicy.cs" />
   </ItemGroup>
 </Project>

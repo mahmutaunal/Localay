@@ -81,12 +81,19 @@ namespace AlpWareStudio.Localay
         public async Task<string?> TranslateAsync(string jsonData, string prompt)
         {
             using var input = JsonDocument.Parse(jsonData);
+            bool managedBlocks = TranslationBlockProtocol.IsEnabled(input.RootElement);
+            if (!GameTranslationProfile.AllowsDispatch(_useCloudApi, managedBlocks))
+            {
+                TranslationRequestContext.ReportFailure(new(TranslationFailureKind.InvalidRequest));
+                return null;
+            }
+            bool allowFallback = GameTranslationProfile.AllowsFallback(managedBlocks);
             // Managed ID batches already share a bounded provider flight. Starting a
             // speculative second provider would duplicate that work and outlive its slot.
-            bool canHedge = !TranslationBlockProtocol.IsEnabled(input.RootElement) &&
+            bool canHedge = allowFallback &&
                 !_useCloudApi && IsFallbackServiceAvailable() && !_freeClient.IsCoolingDown;
             if (!canHedge)
-                return await TranslateWithGoogleAsync(jsonData, prompt, allowFallback: true, TranslationRequestContext.Cancellation);
+                return await TranslateWithGoogleAsync(jsonData, prompt, allowFallback, TranslationRequestContext.Cancellation);
 
             using var cancelGoogle = CancellationTokenSource.CreateLinkedTokenSource(TranslationRequestContext.Cancellation);
             Task<string?> googleTask = TranslateWithGoogleAsync(jsonData, prompt, allowFallback: false, cancelGoogle.Token);
@@ -178,7 +185,7 @@ namespace AlpWareStudio.Localay
                     : ConfigManager.Instance.GetTargetLanguage();
                 
                 // Mapping languages to Google codes
-                if (_autoMapLanguages)
+                if (_autoMapLanguages || _useCloudApi)
                 {
                     sourceLanguage = MapLanguageToGoogleCode(sourceLanguage);
                     targetLanguage = MapLanguageToGoogleCode(targetLanguage);
@@ -489,66 +496,9 @@ namespace AlpWareStudio.Localay
 
         private async Task<List<string?>> TranslateBatchWithCloudApiAsync(IReadOnlyList<string> texts, string sourceLanguage, string targetLanguage)
         {
-            try
-            {
-                if (texts.Count == 0)
-                {
-                    return new List<string?>();
-                }
-
-                if (string.IsNullOrEmpty(_apiKey))
-                {
-                    TranslationRequestContext.ReportFailure(new(TranslationFailureKind.Unauthorized));
-                    Console.WriteLine("Google Translate API key is not configured");
-                    return texts.Select(_ => (string?)null).ToList();
-                }
-
-                string url = $"https://translation.googleapis.com/language/translate/v2?key={_apiKey}";
-                var requestBody = new
-                {
-                    q = texts,
-                    source = sourceLanguage,
-                    target = targetLanguage,
-                    format = "text"
-                };
-
-                string jsonRequest = JsonSerializer.Serialize(requestBody);
-                var content = new StringContent(jsonRequest, Encoding.UTF8, "application/json");
-                var response = await _httpClient.PostAsync(url, content, TranslationRequestContext.Cancellation);
-
-                if (!response.IsSuccessStatusCode)
-                {
-                    Console.WriteLine($"Google Translate batch API error: {response.StatusCode}");
-                    return texts.Select(_ => (string?)null).ToList();
-                }
-
-                string jsonResponse = await response.Content.ReadAsStringAsync(TranslationRequestContext.Cancellation);
-                using JsonDocument doc = JsonDocument.Parse(jsonResponse);
-
-                if (doc.RootElement.TryGetProperty("data", out JsonElement data) &&
-                    data.TryGetProperty("translations", out JsonElement translations) &&
-                    translations.ValueKind == JsonValueKind.Array)
-                {
-                    var results = new List<string?>(translations.GetArrayLength());
-                    foreach (JsonElement translation in translations.EnumerateArray())
-                    {
-                        string translated = translation.TryGetProperty("translatedText", out JsonElement translatedText)
-                            ? HttpUtility.HtmlDecode(translatedText.GetString() ?? string.Empty)
-                            : string.Empty;
-                        results.Add(string.IsNullOrEmpty(translated) ? null : translated);
-                    }
-
-                    return results;
-                }
-
-                return texts.Select(_ => (string?)null).ToList();
-            }
-            catch (Exception ex)
-            {
-                TranslationRequestContext.ReportException(ex);
-                Console.WriteLine($"Error batching Google Cloud translations: {ex.Message}");
-                return texts.Select(_ => (string?)null).ToList();
-            }
+            var values = await new GoogleCloudNmtClient(_httpClient).TranslateAsync(texts,
+                sourceLanguage, targetLanguage, _apiKey, TranslationRequestContext.Cancellation);
+            return values.ToList();
         }
 
         private string NormalizeText(string text)

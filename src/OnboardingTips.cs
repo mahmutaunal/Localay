@@ -1,12 +1,10 @@
 namespace AlpWareStudio.Localay
 {
     /// <summary>
-    /// Contextual hints shown when a user is likely stuck: started without choosing an area,
-    /// OCR finds no text, or translation keeps failing. Also shows a one-time tip after the first success.
+    /// Contextual hints shown when OCR finds no text or translation keeps failing. Also shows a one-time tip after the first success.
     /// </summary>
     public static class OnboardingTips
     {
-        private const string StartWithoutAreaTipId = "start_without_area";
         private const string FirstTranslationTipId = "first_translation";
 
         // With auto OCR, frames come in continuously, so wait for several empty frames before suggesting a fix
@@ -26,7 +24,7 @@ namespace AlpWareStudio.Localay
         /// <summary>
         /// Call when the user presses Start.
         /// </summary>
-        public static void OnTranslationStarted(bool hasSelectedArea)
+        public static void OnTranslationStarted()
         {
             lock (_lock)
             {
@@ -35,12 +33,6 @@ namespace AlpWareStudio.Localay
                 _emptyFramesThisSession = 0;
                 _textSeenThisSession = false;
                 _noTextTipShownThisSession = false;
-            }
-
-            // Selecting the game window alone is not enough; a translation area is still required
-            if (!hasSelectedArea)
-            {
-                ShowOnce(StartWithoutAreaTipId, "Tip_NoArea_Title", Format("Tip_NoArea_Message", S("Btn_SelectArea")));
             }
         }
 
@@ -69,7 +61,7 @@ namespace AlpWareStudio.Localay
                 _noTextTipShownThisSession = true;
             }
 
-            Show("Tip_NoText_Title", Format("Tip_NoText_Message", S("Btn_Settings")));
+            Show("Tip_NoText_Title", S("Flow_GameNoText"));
         }
 
         /// <summary>
@@ -105,9 +97,7 @@ namespace AlpWareStudio.Localay
             {
                 var config = ConfigManager.Instance;
                 ShowOnce(FirstTranslationTipId, "Tip_FirstTranslation_Title",
-                    Format("Tip_FirstTranslation_Message",
-                        config.GetHotKey("Start/Stop"), config.GetHotKey("Overlay"), config.GetHotKey("ChatBox"),
-                        S("Btn_Settings"), S("Tab_HotKeys")));
+                    Format("Flow_GameSuccess", config.GetHotKey("Start/Stop"), S("Btn_Settings")));
             }
         }
 

@@ -57,6 +57,18 @@ Check(!duplicates.HasSameText(new([new("Play", 0, 0, 40, 20)])), "duplicate text
 var ordered = new OcrSceneSnapshot([new("A", 0, 0, 40, 20), new("B", 0, 40, 40, 20)]);
 var reordered = new OcrSceneSnapshot([new("B", 0, 0, 40, 20), new("A", 0, 40, 40, 20)]);
 Check(!ordered.HasSameText(reordered), "reordered text blocks are never paired by the old index");
+Check(ordered.HasSameTranslationUnits(reordered), "OCR ordering does not invalidate work for the same exact source strings");
+Check(duplicates.HasSameTranslationUnits(new([new("Play", 200, 60, 100, 30)])),
+    "duplicate labels and changed geometry can share translation work without sharing presentation");
+var hudAndDialogue = new OcrSceneSnapshot([new("Health", 0, 0, 60, 20), new("Follow me!", 200, 600, 300, 30)]);
+var changedDialogue = new OcrSceneSnapshot([new("Health", 0, 0, 60, 20), new("Take cover!", 200, 600, 300, 30)]);
+Check(!hudAndDialogue.HasSameTranslationUnits(changedDialogue),
+    "an unchanged HUD cannot make a replaced subtitle count as current translation work");
+Check(!hudAndDialogue.HasSameTranslationUnits(new([hudAndDialogue.Blocks[0]])) &&
+    !hudAndDialogue.HasSameTranslationUnits(new([.. hudAndDialogue.Blocks, new("New objective", 30, 80, 200, 20)])),
+    "disappearing dialogue and newly appearing UI both supersede the previous work set");
+Check(!Scene(40, "Play!").HasSameTranslationUnits(Scene(40, "Play?")),
+    "freshness comparisons preserve punctuation and exact meaning rather than fuzzy matching");
 
 using var json = JsonDocument.Parse("""
 [

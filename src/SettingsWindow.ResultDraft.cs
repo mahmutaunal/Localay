@@ -54,6 +54,7 @@ public partial class SettingsWindow
         AddResultInput(resultChatBehaviorForm, "auto_clear_chat_history", "Draft_ResultClearOnStop", "bool");
         AddResultInput(resultChatBehaviorForm, "auto_clear_chat_timeout", "Draft_ResultClearTimeout", "text");
         AddResultInput(resultChatBehaviorForm, "chatbox_recreate_on_show", "Draft_ResultRecreate", "bool");
+        _resultInputRows["IsAutoSetOverlayBackground"].Visibility = Visibility.Collapsed;
     }
 
     private void AddResultInput(Panel parent, string key, string labelKey, string kind)
@@ -156,9 +157,9 @@ public partial class SettingsWindow
         var chatFont = new FontFamily(values["chatbox_font_family"]);
         double Number(string key) => double.Parse(values[key], CultureInfo.InvariantCulture);
         SolidColorBrush Brush(string key) => new((Color)ColorConverter.ConvertFromString(values[key]));
-        overlayPreviewSurface.Background = values["IsAutoSetOverlayBackground"] == "true"
-            ? new SolidColorBrush(Color.FromRgb(35, 44, 58)) : Brush("OverlayBackgroundColor");
-        overlayPreviewText.Foreground = values["IsAutoSetOverlayBackground"] == "true" ? Brushes.White : Brush("OverlayTextColor");
+        var gameBackground = (Color)ColorConverter.ConvertFromString(values["OverlayBackgroundColor"]);
+        overlayPreviewSurface.Background = new SolidColorBrush(Color.FromRgb(gameBackground.R, gameBackground.G, gameBackground.B));
+        overlayPreviewText.Foreground = Brush("OverlayTextColor");
         overlayPreviewText.FontFamily = overlayFont;
         overlayPreviewText.FontSize = Math.Clamp(24, Number("language_font_size_min"), Number("language_font_size_max"));
         var background = (Color)ColorConverter.ConvertFromString(values["chatbox_background_color"]);
@@ -190,8 +191,8 @@ public partial class SettingsWindow
         }
         issue ??= _resultPreviewIssue;
         bool conflict = _resultDraft.HasConflict(ConfigManager.Instance.ReadResultPreferences());
-        _resultInputRows["OverlayBackgroundColor"].IsEnabled = _resultDraft["IsAutoSetOverlayBackground"] != "true";
-        _resultInputRows["OverlayTextColor"].IsEnabled = _resultDraft["IsAutoSetOverlayBackground"] != "true";
+        _resultInputRows["OverlayBackgroundColor"].IsEnabled = true;
+        _resultInputRows["OverlayTextColor"].IsEnabled = true;
         _resultInputRows["language_font_family"].IsEnabled = _resultDraft["language_font_override"] == "true";
         string status = conflict ? "Draft_ResultConflict" : _pendingResultAction != null ? "Draft_ResultDecision"
             : issue ?? _resultDraftStatus ?? (_resultDraft.IsDirty ? "Draft_ResultDirty" : "Draft_ResultClean");

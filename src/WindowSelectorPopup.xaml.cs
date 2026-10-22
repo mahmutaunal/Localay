@@ -25,7 +25,7 @@ namespace AlpWareStudio.Localay
         {
             InitializeComponent();
 
-            UiText.Bind(this, Window.TitleProperty, "SelectWindow_Title");
+            UiText.Bind(this, Window.TitleProperty, "Flow_SelectGame");
             this.Width = 500;
             this.Height = 400;
             this.WindowStartupLocation = WindowStartupLocation.CenterScreen;

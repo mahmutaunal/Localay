@@ -18,6 +18,12 @@
     <Compile Include="../../src/TranslationRequestContext.cs" Link="TranslationRequestContext.cs" />
     <Compile Include="../../src/ITranslationService.cs" Link="ITranslationService.cs" />
     <Compile Include="../../src/TranslationCache.cs" Link="TranslationCache.cs" />
+    <Compile Include="../../src/GameTranslationProfile.cs" Link="GameTranslationProfile.cs" />
+    <Compile Include="../../src/HyMt2Profile.cs" Link="HyMt2Profile.cs" />
+    <Compile Include="../../src/HyMt2Client.cs" Link="HyMt2Client.cs" />
+    <Compile Include="../TranslationResilienceChecks/HyMt2Checks.cs" Link="HyMt2Checks.cs" />
+    <Compile Include="../../src/GoogleCloudNmtClient.cs" Link="GoogleCloudNmtClient.cs" />
+    <Compile Include="../TranslationResilienceChecks/GoogleCloudNmtChecks.cs" Link="GoogleCloudNmtChecks.cs" />
 
     <Compile Include="../../src/SingleResourceCache.cs" Link="SingleResourceCache.cs" />
     <Compile Include="../../src/OverlayPlacementPolicy.cs" Link="OverlayPlacementPolicy.cs" />

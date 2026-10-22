@@ -1370,7 +1370,7 @@ namespace AlpWareStudio.Localay
         // Get/Set Ollama Model
         public string GetOllamaModel()
         {
-            return GetValue(OLLAMA_MODEL, "llama3"); // Default to llama3
+            return GetValue(OLLAMA_MODEL, HyMt2Profile.Model);
         }
 
         public void SetOllamaModel(string model)
@@ -3754,6 +3754,8 @@ namespace AlpWareStudio.Localay
             {
                 "Gemini" => GetGeminiModel(),
                 "ChatGPT" => GetChatGptModel(),
+                "Ollama" when HyMt2Profile.IsModel(GetOllamaModel()) =>
+                    GetOllamaModel() + "|" + GetOllamaApiEndpoint() + "|" + HyMt2Profile.TemplateVersion,
                 "Ollama" => TranslateGemmaClient.IsCandidate(GetOllamaModel())
                     ? GetOllamaModel() + "|" + GetOllamaApiEndpoint() + "|" + TranslateGemmaClient.TemplateVersion
                     : GetOllamaModel(),
@@ -3762,6 +3764,7 @@ namespace AlpWareStudio.Localay
                 "Custom API" => GetCustomApiModel(),
                 "Groq" => GetGroqModel(),
                 "Mistral" => GetMistralModel(),
+                "Google Translate" => GameTranslationProfile.CacheIdentity(GetGoogleTranslateUseCloudApi(), GetGoogleTranslateAutoMapLanguages()),
                 _ => ""
             };
         }

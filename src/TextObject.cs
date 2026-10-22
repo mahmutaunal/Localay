@@ -97,6 +97,29 @@ namespace AlpWareStudio.Localay
             _fitWidth = width;
             _fitVersion = _contentVersion;
         }
+        private double? _gameFontSize;
+        private double LayoutHeight => _gameFontSize is double size
+            ? Math.Max(Height, size * OverlayFontPolicy.LineHeightRatio * 2) : Height;
+        internal string PresentationFontFamily => Options.FontFamily;
+
+        internal void ApplyGameAppearance(double preferredSize)
+        {
+            bool changed = _gameFontSize != preferredSize || EraserElement != null || BackgroundColor.Color.A != 255;
+            _gameFontSize = preferredSize;
+            EraserElement = null;
+            _eraserPixelBounds = null;
+            Border.IsHitTestVisible = false;
+            Border.Cursor = Cursors.Arrow;
+            if (BackgroundColor.Color.A != 255)
+            {
+                var color = BackgroundColor.Color;
+                BackgroundColor = new SolidColorBrush(Color.FromRgb(color.R, color.G, color.B));
+            }
+            if (!changed) return;
+            _appliedState = null;
+            UpdateUIElement();
+        }
+
         internal OcrSceneBlock SourceBlock => _captureGeometry is { } p
             ? new(Text, p.X, p.Y, p.Width, p.Height)
             : new(Text, X * _renderScaleX, Y * _renderScaleY, Width * _renderScaleX, Height * _renderScaleY);
@@ -329,6 +352,13 @@ namespace AlpWareStudio.Localay
         // user-chosen color keeps a crisp box.
         private void ApplyBackground()
         {
+            if (_gameFontSize.HasValue)
+            {
+                Border.Background = BackgroundColor;
+                if (_softBackground != null) _softBackground.Visibility = Visibility.Collapsed;
+                TextBlock.Effect = null;
+                return;
+            }
             bool erased = EraserElement != null;
             bool soft = !erased && _softBackground != null && Options.AutoBackground;
             Border.Background = erased || soft ? null : BackgroundColor;
@@ -413,7 +443,7 @@ namespace AlpWareStudio.Localay
         {
             ApplyFontSize(textBlock, fontSize);
             textBlock.Measure(new Size(LayoutWidth, double.PositiveInfinity));
-            return textBlock.DesiredSize.Height <= Height && textBlock.DesiredSize.Width <= LayoutWidth;
+            return textBlock.DesiredSize.Height <= LayoutHeight && textBlock.DesiredSize.Width <= LayoutWidth;
         }
 
         // Size the text to fill the original text box, staying close to the game's own font size
@@ -422,7 +452,7 @@ namespace AlpWareStudio.Localay
             try
             {
                 // Check if auto sizing is enabled
-                if (!Options.AutoSize)
+                if (!Options.AutoSize && !_gameFontSize.HasValue)
                 {
                     // Fixed font size; still report whether it fits so the layout pass can widen the box
                     TextFitsBox = Width <= 0 || Height <= 0 || FitsAt(textBlock, 24);
@@ -442,12 +472,13 @@ namespace AlpWareStudio.Localay
                 var (configMin, configMax) = OverlayFontPolicy.Bounds(options.Minimum, options.Maximum);
                 double lineHeight = SourceLineHeight > 0 ? SourceLineHeight :
                     OverlayFontPolicy.SourceLineHeight(Width, Height, Text);
-                double preferred = OverlayFontPolicy.PreferredSize(lineHeight, configMin, configMax);
-                double minimum = Math.Min(preferred, Math.Max(configMin, preferred * MinSourceSizeRatio));
+                double preferred = _gameFontSize is double gameSize ? Math.Clamp(gameSize, configMin, configMax)
+                    : OverlayFontPolicy.PreferredSize(lineHeight, configMin, configMax);
+                double minimum = Math.Min(preferred, Math.Max(configMin, preferred * (_gameFontSize.HasValue ? 0.8 : MinSourceSizeRatio)));
                 var cacheKey = new FontLayoutKey(textBlock.Text, textBlock.FontFamily.Source, textBlock.FontWeight,
                     textBlock.FontStyle, textBlock.FontStretch, textBlock.FlowDirection, textBlock.Language.IetfLanguageTag,
                     System.Globalization.CultureInfo.CurrentCulture.Name, VisualTreeHelper.GetDpi(textBlock).PixelsPerDip,
-                    _renderScaleY, LayoutWidth, Height, preferred, minimum, _allowFontShrink);
+                    _renderScaleY, LayoutWidth, LayoutHeight, preferred, minimum, _allowFontShrink);
 
                 // Check cache
                 if (_fontSizeCache.TryGetValue(cacheKey, out var cached))

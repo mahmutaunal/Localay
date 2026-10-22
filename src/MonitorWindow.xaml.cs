@@ -75,6 +75,34 @@ namespace AlpWareStudio.Localay
             _instance.WindowState != WindowState.Minimized &&
             _instance.imageScrollViewer.Visibility == Visibility.Visible;
 
+        private readonly SubtitlePanelPolicy _subtitlePolicy = new();
+        private readonly HashSet<TextObject> _subtitleMembers = new();
+        private Border? _subtitlePanel;
+        private TextBlock? _subtitleText;
+        private System.Windows.Size? _subtitleMeasureConstraint;
+        private System.Windows.Size _subtitleMeasuredSize;
+
+        internal static void ResetGamePresentationIfCreated()
+        {
+            var window = _instance;
+            if (window == null) return;
+            window._subtitlePolicy.Reset();
+            window._subtitleMembers.Clear();
+            window._subtitleMeasureConstraint = null;
+            if (window._subtitlePanel != null)
+            {
+                window._subtitlePanel.Visibility = Visibility.Collapsed;
+                window.textOverlayCanvas.Children.Remove(window._subtitlePanel);
+            }
+        }
+
+        internal static void HideForGameSessionIfCreated()
+        {
+            if (_instance == null) return;
+            _instance.imageScrollViewer.Visibility = Visibility.Collapsed;
+            _instance.Hide();
+        }
+
         internal static void ApplyCapturePreferencesIfCreated(CapturePreferenceValues values)
         {
             var window = _instance;
@@ -144,6 +172,8 @@ namespace AlpWareStudio.Localay
             this.DpiChanged += (_, _) =>
             {
                 TextObject.ClearCache();
+                _subtitleMeasureConstraint = null;
+                _subtitleText?.InvalidateMeasure();
                 RefreshOverlays();
             };
             this.SizeChanged += (_, _) =>
@@ -424,6 +454,7 @@ namespace AlpWareStudio.Localay
         // Update the monitor with a bitmap directly (no file saving required)
         public void UpdateScreenshotFromBitmap()
         {
+            if (!MainWindow.IsGameSessionActive) return;
             if (!Dispatcher.CheckAccess())
             {
                 try
@@ -432,6 +463,7 @@ namespace AlpWareStudio.Localay
                         try
                         {
                             
+                            if (!MainWindow.IsGameSessionActive) return;
                             // Show window if needed
                             if (!IsVisible)
                             {
@@ -663,6 +695,8 @@ namespace AlpWareStudio.Localay
                 foreach (var text in textObjects)
                 {
                     text.ApplyRenderDpi(renderScaleX, renderScaleY);
+                    if (MainWindow.Instance.IsCapturingGameWindow)
+                        text.ApplyGameAppearance(SubtitlePanelPolicy.UiFontSize(ActualHeight));
                     // Inherit the real WPF DPI before fitting a new visual. Hidden
                     // borders can be measured but cannot expose an intermediate layout.
                     if (text.SourceFrameCurrent && text.Border.Parent == null)
@@ -672,8 +706,9 @@ namespace AlpWareStudio.Localay
                     }
                 }
                 ResolveOverlayCollisions(textObjects);
-                var visibleObjects = textObjects.Where(t => t.SourceFrameCurrent && t.LayoutAdmitted).ToArray();
+                var visibleObjects = textObjects.Where(t => t.SourceFrameCurrent && t.LayoutAdmitted && !_subtitleMembers.Contains(t)).ToArray();
                 var desired = new HashSet<System.Windows.UIElement>();
+                if (_subtitleMembers.Count > 0 && _subtitlePanel != null) desired.Add(_subtitlePanel);
                 foreach (var text in visibleObjects)
                 {
                     desired.Add(text.Border);
@@ -684,13 +719,19 @@ namespace AlpWareStudio.Localay
                 foreach (var child in textOverlayCanvas.Children.Cast<System.Windows.UIElement>().ToArray())
                     if (!desired.Contains(child)) textOverlayCanvas.Children.Remove(child);
                 foreach (var text in visibleObjects) CreateMonitorOverlayFromTextObject(this, text);
+                if (_subtitleMembers.Count > 0 && _subtitlePanel != null)
+                {
+                    if (_subtitlePanel.Parent == null) textOverlayCanvas.Children.Add(_subtitlePanel);
+                    _subtitlePanel.Visibility = Visibility.Visible;
+                }
 
                 if (timing != null && !timing.IsFinished)
                 {
                     int translated = textObjects.Count(t => !string.IsNullOrWhiteSpace(t.TextTranslated));
                     int visible = textOverlayCanvas.IsVisible && WindowState != WindowState.Minimized ? textObjects.Count(t =>
-                        !string.IsNullOrWhiteSpace(t.TextTranslated) && t.Border.IsVisible &&
-                        ReferenceEquals(t.Border.Parent, textOverlayCanvas)) : 0;
+                        !string.IsNullOrWhiteSpace(t.TextTranslated) &&
+                        ((_subtitleMembers.Contains(t) && _subtitlePanel?.IsVisible == true && ReferenceEquals(_subtitlePanel.Parent, textOverlayCanvas)) ||
+                         (t.Border.IsVisible && ReferenceEquals(t.Border.Parent, textOverlayCanvas)))) : 0;
                     timing.SetCoverage(textObjects.Count, translated, visible);
                     if (textObjects.Count > 0 && visible == textObjects.Count)
                         timing.Mark(PipelineStage.UiApplied);
@@ -710,19 +751,26 @@ namespace AlpWareStudio.Localay
             }
         }
 
-        // Fit at the source anchor: widen into known free space, then shrink once
-        // to the readable floor. An impossible fit keeps both its patch and border hidden.
+        // Use one stable caption panel when evidence is sufficient; other UI stays
+        // anchored to source boxes. A mask and its complete translation are admitted together.
         private void ResolveOverlayCollisions(IReadOnlyList<TextObject> textObjects)
         {
             foreach (var text in textObjects) text.LayoutAdmitted = false;
+            _subtitleMembers.Clear();
             var sources = textObjects.Where(t => t.SourceFrameCurrent && t.Width > 0 && t.Height > 0).ToArray();
             var boxes = sources.Select(t => new OverlayBox(t.X, t.Y, t.Width, t.Height)).ToArray();
             var directions = sources.Select(t => t.FlowDirection == System.Windows.FlowDirection.RightToLeft).ToArray();
             double width = ActualWidth, height = ActualHeight;
             bool translate = MainWindow.Instance.GetTranslateEnabled();
+            var occupied = new List<OverlayBox>();
+            if (MainWindow.Instance.IsCapturingGameWindow && translate && TryPrepareSubtitlePanel(sources, boxes, width, height, out var captionBounds))
+                occupied.Add(captionBounds);
+            else if (_subtitlePanel != null)
+                _subtitlePanel.Visibility = Visibility.Collapsed;
             for (int i = 0; i < sources.Length; i++)
             {
                 var text = sources[i];
+                if (_subtitleMembers.Contains(text)) continue;
                 if (text.TextBlock == null || (translate && string.IsNullOrWhiteSpace(text.TextTranslated))) continue;
                 bool rtl = text.FlowDirection == System.Windows.FlowDirection.RightToLeft;
                 double available = OverlayPlacementPolicy.AvailableWidth(i, boxes, width, rtl, directions);
@@ -731,10 +779,69 @@ namespace AlpWareStudio.Localay
                 text.Border.Measure(new System.Windows.Size(double.PositiveInfinity, double.PositiveInfinity));
                 var measured = text.Border.DesiredSize;
                 var placement = OverlayPlacementPolicy.Anchor(boxes[i], measured.Width, measured.Height, rtl);
-                if (!OverlayPlacementPolicy.CanPresent(i, boxes, placement, width, height)) continue;
+                if (!OverlayPlacementPolicy.CanPresent(i, boxes, placement, width, height) ||
+                    occupied.Any(box => SubtitlePanelPolicy.Overlaps(box, placement))) continue;
+                occupied.Add(placement);
                 Canvas.SetLeft(text.Border, placement.X); Canvas.SetTop(text.Border, placement.Y);
                 text.LayoutAdmitted = true;
             }
+        }
+
+        private bool TryPrepareSubtitlePanel(IReadOnlyList<TextObject> sources, IReadOnlyList<OverlayBox> boxes,
+            double width, double height, out OverlayBox bounds)
+        {
+            bounds = default;
+            var plan = _subtitlePolicy.Observe(boxes, sources.Select(t => t.Text).ToArray(), width, height);
+            if (plan == null || plan.Members.Any(i => string.IsNullOrWhiteSpace(sources[i].TextTranslated))) return false;
+            var first = sources[plan.Members[0]];
+            if (plan.Members.Any(i => sources[i].FlowDirection != first.FlowDirection)) return false;
+            if (_subtitleText == null)
+            {
+                _subtitleText = new TextBlock { TextWrapping = TextWrapping.Wrap, TextTrimming = TextTrimming.None,
+                    TextAlignment = TextAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                    LineStackingStrategy = LineStackingStrategy.BlockLineHeight };
+                _subtitlePanel = new Border { Child = _subtitleText, Padding = new Thickness(8),
+                    IsHitTestVisible = false, Visibility = Visibility.Hidden };
+            }
+            string caption = string.Join("\n", plan.Members.Select(i => sources[i].TextTranslated));
+            var limits = OverlayFontPolicy.Bounds(ConfigManager.Instance.GetLanguageFontSizeMin(), ConfigManager.Instance.GetLanguageFontSizeMax());
+            double fontSize = Math.Clamp(plan.FontSize, limits.Min, limits.Max);
+            var constraint = new System.Windows.Size(plan.Bounds.Width - 16, double.PositiveInfinity);
+            bool fontChanged = _subtitleText.FontFamily.Source != first.PresentationFontFamily;
+            bool contentChanged = _subtitleText.Text != caption || _subtitleText.FlowDirection != first.FlowDirection ||
+                fontChanged || _subtitleText.FontSize != fontSize;
+            // A stable admitted caption stays visible. Hide only while preparing new
+            // content/layout, and attach before measuring so WPF inherits the real DPI.
+            if (contentChanged || _subtitleMeasureConstraint != constraint || !_subtitleText.IsMeasureValid || _subtitlePanel!.Parent == null)
+                _subtitlePanel!.Visibility = Visibility.Hidden;
+            if (_subtitlePanel!.Parent == null) textOverlayCanvas.Children.Add(_subtitlePanel);
+            if (_subtitleText.Text != caption) _subtitleText.Text = caption;
+            if (_subtitleText.FlowDirection != first.FlowDirection) _subtitleText.FlowDirection = first.FlowDirection;
+            if (fontChanged) _subtitleText.FontFamily = new FontFamily(first.PresentationFontFamily);
+            _subtitleText.Foreground = first.TextColor;
+            _subtitlePanel!.Background = first.BackgroundColor;
+            _subtitleText.FontSize = fontSize;
+            _subtitleText.LineHeight = _subtitleText.FontSize * OverlayFontPolicy.LineHeightRatio;
+            // WPF invalidates this measurement when text/font/inherited layout changes.
+            // Reuse only a valid measurement with exactly the same available width.
+            if (_subtitleMeasureConstraint != constraint || !_subtitleText.IsMeasureValid)
+            {
+                _subtitleText.Measure(constraint);
+                // Keep the unconstrained-height result: a subsequent parent layout
+                // pass may measure the TextBlock with the panel's finite height.
+                _subtitleMeasuredSize = _subtitleText.DesiredSize;
+                _subtitleMeasureConstraint = constraint;
+            }
+            // Never truncate meaning or cover source text with an incomplete/unreadable panel.
+            if (_subtitleMeasuredSize.Width > plan.Bounds.Width - 16 ||
+                _subtitleMeasuredSize.Height > plan.Bounds.Height - 16) return false;
+            if (_subtitlePanel.Width != plan.Bounds.Width) _subtitlePanel.Width = plan.Bounds.Width;
+            if (_subtitlePanel.Height != plan.Bounds.Height) _subtitlePanel.Height = plan.Bounds.Height;
+            if (Canvas.GetLeft(_subtitlePanel) != plan.Bounds.X) Canvas.SetLeft(_subtitlePanel, plan.Bounds.X);
+            if (Canvas.GetTop(_subtitlePanel) != plan.Bounds.Y) Canvas.SetTop(_subtitlePanel, plan.Bounds.Y);
+            foreach (int member in plan.Members) _subtitleMembers.Add(sources[member]);
+            bounds = plan.Bounds;
+            return true;
         }
 
         // Draw exclude regions on the overlay

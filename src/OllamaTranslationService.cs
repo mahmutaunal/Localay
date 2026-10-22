@@ -23,7 +23,7 @@ namespace AlpWareStudio.Localay
             string endpoint = ConfigManager.Instance.GetOllamaApiEndpoint();
             string model = ConfigManager.Instance.GetOllamaModel();
             string json = System.Text.Json.JsonSerializer.Serialize(new { model,
-                keep_alive = TranslateGemmaClient.IsCandidate(model) ? "5m" : "30m" });
+                keep_alive = TranslateGemmaClient.IsCandidate(model) || HyMt2Profile.IsModel(model) ? "5m" : "30m" });
             using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
             using var response = await _httpClient.PostAsync(endpoint, content, TranslationRequestContext.Cancellation);
             response.EnsureSuccessStatusCode();
@@ -43,6 +43,13 @@ namespace AlpWareStudio.Localay
                 // Get the Ollama API endpoint and model from config
                 string ollamaEndpoint = ConfigManager.Instance.GetOllamaApiEndpoint();
                 string ollamaModel = ConfigManager.Instance.GetOllamaModel();
+                if (HyMt2Profile.IsModel(ollamaModel))
+                {
+                    string? translated = await new HyMt2Client(_httpClient, new Uri(ollamaEndpoint), ollamaModel)
+                        .TranslateAsync(jsonData, TranslationRequestContext.Cancellation);
+                    if (translated != null) TranslationErrorNotifier.Reset("Ollama");
+                    return translated;
+                }
                 if (TranslateGemmaClient.IsCandidate(ollamaModel))
                 {
                     string? translated = await new TranslateGemmaClient(_httpClient, new Uri(ollamaEndpoint), ollamaModel)

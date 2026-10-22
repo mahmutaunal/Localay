@@ -6,5 +6,13 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <NuGetAudit>true</NuGetAudit>
   </PropertyGroup>
-  <ItemGroup><Compile Include="../../src/StartupSequence.cs" Link="StartupSequence.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../src/StartupSequence.cs" Link="StartupSequence.cs" />
+    <Compile Include="../../src/GameWorkflowReadiness.cs" Link="GameWorkflowReadiness.cs" />
+    <Compile Include="../../src/GameTranslationProfile.cs" Link="GameTranslationProfile.cs" />
+    <Compile Include="../../src/HyMt2Profile.cs" Link="HyMt2Profile.cs" />
+    <Compile Include="../../src/GameSessionPolicy.cs" Link="GameSessionPolicy.cs" />
+    <Compile Include="../../src/GameWindowObserver.cs" Link="GameWindowObserver.cs" />
+    <Compile Include="../../src/PipelineLifetime.cs" Link="PipelineLifetime.cs" />
+  </ItemGroup>
 </Project>
