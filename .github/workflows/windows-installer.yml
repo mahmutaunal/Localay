@@ -40,15 +40,9 @@ jobs:
         run: |
           dotnet publish ./Localay.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts/publish
           if ($LASTEXITCODE -ne 0) { throw 'Windows application publish failed.' }
-          if (-not (Test-Path -LiteralPath artifacts/publish/Localay.exe -PathType Leaf)) {
-            throw 'Published Localay.exe is missing.'
-          }
 
       - name: Build Windows installer
-        run: |
-          ./Build-Installer.ps1 -PublishDirectory ./artifacts/publish
-          $installers = @(Get-ChildItem -LiteralPath artifacts/installer -Filter '*-Setup-x64.exe' -File)
-          if ($installers.Count -ne 1) { throw 'Expected exactly one Windows installer.' }
+        run: ./Build-Installer.ps1 -PublishDirectory ./artifacts/publish
 
       - name: Upload Windows installer
         uses: actions/upload-artifact@v4

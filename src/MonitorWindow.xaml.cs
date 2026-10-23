@@ -817,7 +817,7 @@ namespace AlpWareStudio.Localay
             if (_subtitlePanel!.Parent == null) textOverlayCanvas.Children.Add(_subtitlePanel);
             if (_subtitleText.Text != caption) _subtitleText.Text = caption;
             if (_subtitleText.FlowDirection != first.FlowDirection) _subtitleText.FlowDirection = first.FlowDirection;
-            if (fontChanged) _subtitleText.FontFamily = new FontFamily(first.PresentationFontFamily);
+            if (fontChanged) _subtitleText.FontFamily = new System.Windows.Media.FontFamily(first.PresentationFontFamily);
             _subtitleText.Foreground = first.TextColor;
             _subtitlePanel!.Background = first.BackgroundColor;
             _subtitleText.FontSize = fontSize;
